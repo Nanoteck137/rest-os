@@ -8,8 +8,10 @@ SECTIONS {
     .bootstrap :
     {
         /* ensure that the multiboot header is at the beginning */
-        target/boot.o *(.multiboot_header)
+        target/boot.o (.multiboot_header)
         target/boot.o (.text)
+        target/boot.o (.bss)
+        target/boot.o (.rodata)
     }
 
     . += KERNEL_VMA;

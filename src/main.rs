@@ -46,6 +46,7 @@ fn compile_asm<P: AsRef<Path>>(source: P) -> Option<()> {
 
     // Compile the assembly file
     let output = Command::new("nasm")
+        .arg("-g")
         .arg("-f")
         .arg("elf64")
         .arg(source)
@@ -71,10 +72,6 @@ fn build_kernel_asm_files() -> Option<()> {
         kernel_source(&["arch", "x86_64", "boot", "boot.asm"]);
     compile_asm(asm_source)?;
 
-    let asm_source =
-        kernel_source(&["arch", "x86_64", "boot", "test.asm"]);
-    compile_asm(asm_source)?;
-
     Some(())
 }
 
@@ -98,13 +95,12 @@ fn main() {
         .arg("kernel/src/arch/x86_64/linker.ld")
         .arg("-o")
         .arg(target)
-        .arg("target/test.o")
         .output()
             .expect("Unknown error when running 'ld' (is ld installed?)");
 
     if !output.status.success() {
         let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
-        eprintln!("Error Message:\n{}", error_message);
+        eprintln!("Linking Error Message:\n{}", error_message);
     }
 
     let source = target_dir(&["kernel.elf"]);
@@ -116,6 +112,8 @@ fn main() {
     let dest = target_dir(&["isofiles", "boot", "grub", "grub.cfg"]);
 
     let _ = std::fs::copy(source, dest);
+
+    println!("Creating the Image");
 
     let target = target_dir(&["image.iso"]);
     let iso_dir = target_dir(&["isofiles"]);
