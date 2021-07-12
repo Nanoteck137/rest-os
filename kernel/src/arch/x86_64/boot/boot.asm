@@ -99,6 +99,14 @@ extern kernel_init
 long_mode_start:
     ; NOTE(patrik): Now we are in 64 bit land
 
+    ; Setup all the segment register
+    mov ax, 0
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
     call setup_upper_half_paging
     ; Reload the cr3 to flush the caches (I don't think this need to happen
     ;   but to be on the safe side)
