@@ -1,6 +1,6 @@
 ENTRY(boot_entry)
 
-KERNEL_VMA = 0xfff8000000000000;
+KERNEL_VMA = 0xffffffff80000000;
 
 SECTIONS {
     . = 1M;

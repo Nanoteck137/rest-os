@@ -91,7 +91,9 @@ setup_page_tables:
 
     ret
 
+section .text
 bits 64
+extern kernel_init
 long_mode_start:
     ; NOTE(patrik): Now we are in 64 bit land
 
@@ -111,6 +113,10 @@ long_mode_start:
 
     mov rax, 0x2f592f412f4b2f4f
     mov qword [0xb8000], rax
+
+    mov rax, kernel_init
+    call rax
+
     hlt
 
 setup_upper_half_paging:

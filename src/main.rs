@@ -75,6 +75,35 @@ fn build_kernel_asm_files() -> Option<()> {
     Some(())
 }
 
+fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P)
+    -> Option<()>
+{
+    let project_path = project_path.as_ref();
+    let target_path = target_path.as_ref().canonicalize().ok()?;
+    println!("Building rust: {:?} -> {:?}", project_path, target_path);
+    let output = Command::new("cargo")
+        .current_dir(project_path)
+        .arg("build")
+        .arg("--target-dir")
+        .arg(target_path)
+        .output()
+            .expect("Unknown error when running 'cargo'");
+
+    if !output.status.success() {
+        let error_message = std::str::from_utf8(&output.stderr).ok()?;
+        eprintln!("Error Message:\n{}", error_message);
+        return None;
+    }
+
+    Some(())
+}
+
+fn build_rust_projects() -> Option<()> {
+    build_rust_project("kernel", "target")?;
+
+    Some(())
+}
+
 fn main() {
     println!("Building Rest-OS");
 
@@ -87,6 +116,7 @@ fn main() {
     println!("Kernel Source directory: {:?}", kernel_source(&[]));
 
     build_kernel_asm_files().expect("Failed to build the assembly files");
+    build_rust_projects().expect("Failed to build the rust projects");
 
     let target = target_dir(&["kernel.elf"]);
     let output = Command::new("ld")
@@ -95,6 +125,7 @@ fn main() {
         .arg("kernel/src/arch/x86_64/linker.ld")
         .arg("-o")
         .arg(target)
+        .arg("target/x86_64-rest-os/debug/librest_os.a")
         .output()
             .expect("Unknown error when running 'ld' (is ld installed?)");
 
