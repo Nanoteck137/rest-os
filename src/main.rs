@@ -81,17 +81,15 @@ fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P)
     let project_path = project_path.as_ref();
     let target_path = target_path.as_ref().canonicalize().ok()?;
     println!("Building rust: {:?} -> {:?}", project_path, target_path);
-    let output = Command::new("cargo")
+    let status = Command::new("cargo")
         .current_dir(project_path)
         .arg("build")
         .arg("--target-dir")
         .arg(target_path)
-        .output()
+        .status()
             .expect("Unknown error when running 'cargo'");
 
-    if !output.status.success() {
-        let error_message = std::str::from_utf8(&output.stderr).ok()?;
-        eprintln!("Error Message:\n{}", error_message);
+    if !status.success() {
         return None;
     }
 
