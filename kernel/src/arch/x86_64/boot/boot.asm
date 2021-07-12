@@ -23,19 +23,15 @@ boot_entry:
     cli
     cld
 
-    mov esp, stack_bottom
+    mov esp, stack_top
 
+    ; Push the ebx register becuase it hold the pointer to the Multiboot
+    ; structure needed by the kernel
     push ebx
 
     ; TODO(patrik): Check multiboot
     ; TODO(patrik): Check if CPUID is available
     ; TODO(patrik): Check if Long mode is available
-
-    ; The plan
-    ; Identity map the first 512 MiB of memory
-    ; Enter Long Mode
-    ; Then map in the kernel at the upper memory region, becuase we need to
-    ; use 64 bit instruction to change the page table correctly
 
     call setup_page_tables
     call enable_paging
@@ -71,26 +67,50 @@ enable_paging:
     ret
 
 setup_page_tables:
+    ; Add the lower p3 table to the p4 table
     mov eax, lower_p3_table
     or eax, 0b11
     mov [p4_table + 0 * 8], eax
 
+    ; Add the lower p2 table to the lower p3 table
     mov eax, lower_p2_table
     or eax, 0b11
     mov [lower_p3_table + 0 * 8], eax
 
+    ; Add the upper p3 table to the p4 table
+    mov eax, upper_p3_table
+    or eax, 0b11
+    mov [p4_table + 511 * 8], eax
+
+    ; Add the upper p2 table to the upper p3 table
+    mov eax, upper_p2_table
+    or eax, 0b11
+    mov [upper_p3_table + 510 * 8], eax
+
+    ; Initialize the counter
     mov ecx, 0
 
 .map_p2_table:
+    ; 2-MiB steps per page
     mov eax, 0x200000
+    ; Multiply the index
     mul ecx
+    ; Add the PRESENT + WRITABLE + HUGE flags to the entry
     or eax, 0b10000011
+    ; Add the entry to both the lower and upper p2 tables
     mov [lower_p2_table + ecx * 8], eax
+    mov [upper_p2_table + ecx * 8], eax
 
+    ; Increment the counter
     inc ecx
-    cmp ecx, 256
+    ; If we the counter reaches 512 then we have mapped all the 512
+    ; entries insides the lower and upper p2 tables
+    cmp ecx, 512
+    ; If the counter is not equal to 512 then continue to map in the entries
+    ; needed inside the tables
     jne .map_p2_table
 
+    ; Return from the function
     ret
 
 section .text
@@ -107,12 +127,6 @@ long_mode_start:
     mov gs, ax
     mov ss, ax
 
-    call setup_upper_half_paging
-    ; Reload the cr3 to flush the caches (I don't think this need to happen
-    ;   but to be on the safe side)
-    mov rax, cr3
-    mov cr3, rax
-
     ; Jump to the upper half of the kernel
     ; To do so we need to add the offset to RIP and we do so by adding
     ; the offset for an jump and then jumping to the location + the offset
@@ -121,37 +135,16 @@ long_mode_start:
     jmp rax
 .target:
 
-    mov rax, 0x2f592f412f4b2f4f
-    mov qword [0xb8000], rax
-
+    ; Pop of the Multiboot Structure pointer we pushed on previously
     pop rdi
 
+    ; Set rax to the kernel_init function from rust becuase i did have a
+    ; problem with just 'call kernel_init' and this fixed that problem
     mov rax, kernel_init
+    ; Call the kernel_init function
     call rax
 
     hlt
-
-setup_upper_half_paging:
-    mov rax, upper_p3_table
-    or rax, 0b11
-    mov [p4_table + 511 * 8], rax
-
-    mov rax, upper_p2_table
-    or rax, 0b11
-    mov [upper_p3_table + 510 * 8], rax
-
-    mov rcx, 0
-.map_p2_table:
-    mov rax, 0x200000
-    mul rcx
-    or rax, 0b10000011
-    mov [upper_p2_table + rcx * 8], rax
-
-    inc rcx
-    cmp rcx, 256
-    jne .map_p2_table
-
-    ret
 
 section .bss
 align 4096
@@ -173,7 +166,7 @@ lower_p2_table:
     resb 4096
 
 stack_bottom:
-    resb 1024
+    resb 4096
 stack_top:
 
 section .rodata
