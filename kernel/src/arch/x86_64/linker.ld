@@ -18,6 +18,21 @@ SECTIONS {
 
     .text : AT(ADDR(.text) - KERNEL_VMA)
     {
-        *(EXCLUDE_FILE(*target/boot.o) .text)
+        *(EXCLUDE_FILE(*target/boot.o) .text .text.*)
+    }
+
+    .data : AT(ADDR(.data) - KERNEL_VMA)
+    {
+        *(EXCLUDE_FILE(*target/boot.o) .data .data.*)
+    }
+
+    .rodata : AT(ADDR(.rodata) - KERNEL_VMA)
+    {
+        *(EXCLUDE_FILE(*target/boot.o) .rodata .rodata.*)
+    }
+
+    .bss : AT(ADDR(.bss) - KERNEL_VMA)
+    {
+        *(EXCLUDE_FILE(*target/boot.o) .bss .bss.*)
     }
 }
