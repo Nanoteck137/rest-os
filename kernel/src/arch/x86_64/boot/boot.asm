@@ -25,6 +25,8 @@ boot_entry:
 
     mov esp, stack_bottom
 
+    push ebx
+
     ; TODO(patrik): Check multiboot
     ; TODO(patrik): Check if CPUID is available
     ; TODO(patrik): Check if Long mode is available
@@ -113,6 +115,8 @@ long_mode_start:
 
     mov rax, 0x2f592f412f4b2f4f
     mov qword [0xb8000], rax
+
+    pop rdi
 
     mov rax, kernel_init
     call rax

@@ -4,6 +4,8 @@
 use core::panic::PanicInfo;
 use spin::Mutex;
 
+const KERNEL_TEXT_OFFSET: u64 = 0xffffffff80000000;
+
 fn out8(address: u16, data: u8) {
     unsafe {
         asm!("out dx, al", in("dx") address, in("al") data);
@@ -87,7 +89,7 @@ fn _print_fmt(args: core::fmt::Arguments) {
 }
 
 #[no_mangle]
-extern fn kernel_init() -> ! {
+extern fn kernel_init(multiboot_addr: u64) -> ! {
     {
         *SERIAL_PORT.lock() = Some(SerialPort::new(0x3f8));
     }
@@ -97,7 +99,10 @@ extern fn kernel_init() -> ! {
         *ptr.offset(0) = 0x1f41;
     }
 
-    println!("Hello World {}", 123);
+
+    println!("Hello World {:#x}", unsafe { *((multiboot_addr + KERNEL_TEXT_OFFSET) as *const u64) });
+    println!("Hello World {:#x}", unsafe { *(multiboot_addr as *const u64) });
+
 
     loop {}
 }
