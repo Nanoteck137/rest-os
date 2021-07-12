@@ -99,10 +99,34 @@ extern fn kernel_init(multiboot_addr: u64) -> ! {
         *ptr.offset(0) = 0x1f41;
     }
 
+    // Offset the address so we are inside the kernel text area
+    let multiboot_addr = multiboot_addr + KERNEL_TEXT_OFFSET;
 
-    println!("Hello World {:#x}", unsafe { *((multiboot_addr + KERNEL_TEXT_OFFSET) as *const u64) });
-    println!("Hello World {:#x}", unsafe { *(multiboot_addr as *const u64) });
+    let size =
+        unsafe { core::ptr::read_volatile(multiboot_addr as *const u64) };
+    println!("Multiboot Structure Size: {}", size);
 
+    let start_ptr = (multiboot_addr + 8) as *const u8;
+    let mut offset = 0u64;
+    loop {
+        let ptr = unsafe { start_ptr.offset(offset as isize) };
+        println!("Ptr: {:?}", ptr);
+        let tag_type = unsafe { *(ptr.offset(0) as *const u32) };
+        if tag_type == 0 {
+            break;
+        }
+
+        let tag_size = unsafe { *(ptr.offset(4) as *const u32) };
+
+        println!("Found tag: {}:{}", tag_type, tag_size);
+
+        offset += ((tag_size + 7) & !7) as u64;
+        if offset >= size {
+            break;
+        }
+    }
+
+    println!("Done!");
 
     loop {}
 }
