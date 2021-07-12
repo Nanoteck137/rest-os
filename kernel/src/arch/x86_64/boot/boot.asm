@@ -24,8 +24,6 @@ boot_entry:
     cld
 
     mov esp, stack_bottom
-    ; TODO(patrik): Setup an temporary stack
-
 
     ; TODO(patrik): Check multiboot
     ; TODO(patrik): Check if CPUID is available
@@ -71,21 +69,21 @@ enable_paging:
     ret
 
 setup_page_tables:
-    mov eax, p3_table
+    mov eax, lower_p3_table
     or eax, 0b11
     mov [p4_table + 0 * 8], eax
 
-    mov eax, p2_table
+    mov eax, lower_p2_table
     or eax, 0b11
-    mov [p3_table + 0 * 8], eax
+    mov [lower_p3_table + 0 * 8], eax
 
     mov ecx, 0
 
 .map_p2_table:
-    add eax, 0x200000
+    mov eax, 0x200000
     mul ecx
     or eax, 0b10000011
-    mov [p2_table + ecx * 8], eax
+    mov [lower_p2_table + ecx * 8], eax
 
     inc ecx
     cmp ecx, 256
@@ -95,18 +93,67 @@ setup_page_tables:
 
 bits 64
 long_mode_start:
+    ; NOTE(patrik): Now we are in 64 bit land
+
+    call setup_upper_half_paging
+    ; Reload the cr3 to flush the caches (I don't think this need to happen
+    ;   but to be on the safe side)
+    mov rax, cr3
+    mov cr3, rax
+
+    ; Jump to the upper half of the kernel
+    ; To do so we need to add the offset to RIP and we do so by adding
+    ; the offset for an jump and then jumping to the location + the offset
+    mov rax, .target
+    add rax, 0xffffffff80000000
+    jmp rax
+.target:
+
     mov rax, 0x2f592f412f4b2f4f
     mov qword [0xb8000], rax
     hlt
+
+setup_upper_half_paging:
+    mov rax, upper_p3_table
+    or rax, 0b11
+    mov [p4_table + 511 * 8], rax
+
+    mov rax, upper_p2_table
+    or rax, 0b11
+    mov [upper_p3_table + 510 * 8], rax
+
+    mov rcx, 0
+.map_p2_table:
+    mov rax, 0x200000
+    mul rcx
+    or rax, 0b10000011
+    mov [upper_p2_table + rcx * 8], rax
+
+    inc rcx
+    cmp rcx, 256
+    jne .map_p2_table
+
+    ret
 
 section .bss
 align 4096
 p4_table:
     resb 4096
-p3_table:
+
+; NOTE(patrik): The upper tables are used for the mapping for
+; the Higher half kernel
+upper_p3_table:
     resb 4096
-p2_table:
+upper_p2_table:
     resb 4096
+
+; NOTE(patrik): The lower tables are used for the mapping for
+; the Lower half kernel
+lower_p3_table:
+    resb 4096
+lower_p2_table:
+    resb 4096
+
 stack_bottom:
     resb 1024
 stack_top:
