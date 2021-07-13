@@ -1,4 +1,4 @@
-#![feature(asm)]
+#![feature(asm, panic_info_message)]
 #![no_std]
 
 mod multiboot;
@@ -119,7 +119,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 }
             }
 
-            MultibootTag::Framebuffer(framebuffer) => println!("{:#?}", framebuffer),
+            MultibootTag::Framebuffer(framebuffer) =>
+                println!("{:#?}", framebuffer),
 
             MultibootTag::Unknown(index) =>
                 println!("Unknown index: {}", index),
@@ -132,6 +133,18 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    println!("---------------- KERNEL PANIC ----------------");
+    // Print out the location of the panic
+    if let Some(loc) = info.location() {
+        println!("Location: {}:{}", loc.file(), loc.line());
+    }
+
+    // Print out the message of the panic
+    if let Some(message) = info.message() {
+        println!("Message: {}", message);
+    }
+    println!("----------------------------------------------");
+
     loop {}
 }
