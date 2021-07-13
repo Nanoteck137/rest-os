@@ -6,7 +6,7 @@ mod multiboot;
 use core::panic::PanicInfo;
 use spin::Mutex;
 
-use multiboot::{ Multiboot, MultibootTag };
+use multiboot::{ Multiboot, Tag };
 
 const KERNEL_TEXT_OFFSET: usize = 0xffffffff80000000;
 
@@ -109,20 +109,29 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     for tag in multiboot.tags() {
         match tag {
-            MultibootTag::CommandLine(s) => println!("Command Line: {}", s),
-            MultibootTag::BootloaderName(s) =>
+            Tag::CommandLine(s) => println!("Command Line: {}", s),
+            Tag::BootloaderName(s) =>
                 println!("Bootloader Name: {}", s),
 
-            MultibootTag::MemoryMap(memory_map) => {
+            Tag::MemoryMap(memory_map) => {
                 for entry in memory_map.iter() {
                     println!("Entry: {:#x?}", entry);
                 }
             }
 
-            MultibootTag::Framebuffer(framebuffer) =>
+            Tag::Framebuffer(framebuffer) =>
                 println!("{:#?}", framebuffer),
 
-            MultibootTag::Unknown(index) =>
+            Tag::Acpi1(addr) =>
+                println!("ACPI 1.0: {:#x}", addr),
+
+            Tag::Acpi2(addr) =>
+                println!("ACPI 2.0: {:#x}", addr),
+
+            Tag::LoadBaseAddr(addr) =>
+                println!("Load Base Addr: {:#x}", addr),
+
+            Tag::Unknown(index) =>
                 println!("Unknown index: {}", index),
         }
     }
