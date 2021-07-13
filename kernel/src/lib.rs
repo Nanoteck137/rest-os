@@ -1,10 +1,14 @@
 #![feature(asm)]
 #![no_std]
 
+mod multiboot;
+
 use core::panic::PanicInfo;
 use spin::Mutex;
 
-const KERNEL_TEXT_OFFSET: u64 = 0xffffffff80000000;
+use multiboot::{ Multiboot, MultibootTag };
+
+const KERNEL_TEXT_OFFSET: usize = 0xffffffff80000000;
 
 fn out8(address: u16, data: u8) {
     unsafe {
@@ -89,7 +93,7 @@ fn _print_fmt(args: core::fmt::Arguments) {
 }
 
 #[no_mangle]
-extern fn kernel_init(multiboot_addr: u64) -> ! {
+extern fn kernel_init(multiboot_addr: usize) -> ! {
     {
         *SERIAL_PORT.lock() = Some(SerialPort::new(0x3f8));
     }
@@ -101,28 +105,24 @@ extern fn kernel_init(multiboot_addr: u64) -> ! {
 
     // Offset the address so we are inside the kernel text area
     let multiboot_addr = multiboot_addr + KERNEL_TEXT_OFFSET;
+    let multiboot = unsafe { Multiboot::from_addr(multiboot_addr) };
 
-    let size =
-        unsafe { core::ptr::read_volatile(multiboot_addr as *const u64) };
-    println!("Multiboot Structure Size: {}", size);
+    for tag in multiboot.tags() {
+        match tag {
+            MultibootTag::CommandLine(s) => println!("Command Line: {}", s),
+            MultibootTag::BootloaderName(s) =>
+                println!("Bootloader Name: {}", s),
 
-    let start_ptr = (multiboot_addr + 8) as *const u8;
-    let mut offset = 0u64;
-    loop {
-        let ptr = unsafe { start_ptr.offset(offset as isize) };
-        println!("Ptr: {:?}", ptr);
-        let tag_type = unsafe { *(ptr.offset(0) as *const u32) };
-        if tag_type == 0 {
-            break;
-        }
+            MultibootTag::MemoryMap(memory_map) => {
+                for entry in memory_map.iter() {
+                    println!("Entry: {:#x?}", entry);
+                }
+            }
 
-        let tag_size = unsafe { *(ptr.offset(4) as *const u32) };
+            MultibootTag::Framebuffer(framebuffer) => println!("{:#?}", framebuffer),
 
-        println!("Found tag: {}:{}", tag_type, tag_size);
-
-        offset += ((tag_size + 7) & !7) as u64;
-        if offset >= size {
-            break;
+            MultibootTag::Unknown(index) =>
+                println!("Unknown index: {}", index),
         }
     }
 
