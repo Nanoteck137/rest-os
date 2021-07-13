@@ -156,7 +156,7 @@ impl MultibootTagFramebuffer {
     fn parse(bytes: &[u8]) -> Option<Self> {
         let tag_type = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
         assert!(tag_type == 8, "Mismatch tag type");
-        let tag_size = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+        let _tag_size = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
 
         let addr = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
         let addr = addr as usize;
@@ -165,7 +165,7 @@ impl MultibootTagFramebuffer {
         let width = u32::from_le_bytes(bytes[20..24].try_into().ok()?);
         let height = u32::from_le_bytes(bytes[24..28].try_into().ok()?);
         let bits_per_pixel = bytes[28];
-        let typ = bytes[29];
+        let _typ = bytes[29];
 
         Some(Self {
             addr,
