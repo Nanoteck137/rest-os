@@ -1,3 +1,13 @@
+//! This module handles the Multiboot Structure and parses all the diffrent
+//! tags and gives the user a interface to access the tag data
+//! for example the memory map
+//!
+//! TODO(patrik):
+//!   * Fix all the memory access this module does
+//!   * Implement all the tag from the Multiboot2 spec
+//!   * Cleanup the code
+//!     * Get accessors
+
 use core::convert::TryInto;
 use super::println;
 
@@ -5,12 +15,32 @@ use super::println;
 pub enum Tag<'a> {
     CommandLine(&'a str),
     BootloaderName(&'a str),
+    BasicMemInfo(u32, u32),
+    BootDev(BootDev),
     MemoryMap(MemoryMap<'a>),
     Framebuffer(Framebuffer),
+    ElfSections(ElfSections<'a>),
     Acpi1(usize),
     Acpi2(usize),
     LoadBaseAddr(usize),
     Unknown(u32),
+}
+
+#[derive(Debug)]
+pub struct BootDev {
+    bios_dev: u32,
+    partition: u32,
+    sub_partition: u32,
+}
+
+impl BootDev {
+    fn new(bios_dev: u32, partition: u32, sub_partition: u32) -> Self {
+        Self {
+            bios_dev,
+            partition,
+            sub_partition
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -25,7 +55,6 @@ impl MemoryMapEntry {
         let addr = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
         let length = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
         let typ = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
-
 
         Some(Self {
             addr,
@@ -152,6 +181,166 @@ impl Framebuffer {
     }
 }
 
+#[derive(Debug)]
+pub struct ElfSection {
+    pub name_index: u32,
+    typ: u32,
+    flags: u64,
+    addr: u64,
+    offset: u64,
+    size: u64,
+    link: u32,
+    info: u32,
+    addr_align: u64,
+    entry_size: u64,
+}
+
+impl ElfSection {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        assert!(bytes.len() >= 64, "ELF section mismatch length");
+
+        let name_index = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+        let typ = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+        let flags = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
+        let addr = u64::from_le_bytes(bytes[16..24].try_into().ok()?);
+        let offset = u64::from_le_bytes(bytes[24..32].try_into().ok()?);
+        let size = u64::from_le_bytes(bytes[32..40].try_into().ok()?);
+        let link = u32::from_le_bytes(bytes[40..44].try_into().ok()?);
+        let info = u32::from_le_bytes(bytes[44..48].try_into().ok()?);
+        let addr_align = u64::from_le_bytes(bytes[48..56].try_into().ok()?);
+        let entry_size = u64::from_le_bytes(bytes[56..64].try_into().ok()?);
+
+        Some(Self {
+            name_index,
+            typ,
+            flags,
+            addr,
+            offset,
+            size,
+            link,
+            info,
+            addr_align,
+            entry_size,
+        })
+    }
+}
+
+pub struct ElfStringTable<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> ElfStringTable<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+        }
+    }
+
+    pub fn string(&self, index: u32) -> Option<&'a str> {
+        let index = index as usize;
+
+        let length = {
+            let mut length = 0;
+            let mut offset = index;
+
+            while self.bytes[offset] != 0 {
+                offset += 1;
+                length += 1;
+            }
+
+            length
+        };
+
+        core::str::from_utf8(&self.bytes[index..index + length]).ok()
+    }
+}
+
+#[derive(Debug)]
+pub struct ElfSections<'a> {
+    bytes: &'a [u8],
+    start_offset: usize,
+    num_entries: u32,
+    entry_size: u32,
+    string_table_index: u32
+}
+
+impl<'a> ElfSections<'a> {
+    fn parse(bytes: &'a [u8]) -> Option<Self> {
+        let tag_type = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+        assert!(tag_type == 9, "Mismatch tag type");
+        let _tag_size = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+
+        let num_entries = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
+
+        let entry_size = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
+
+        let string_table_index =
+            u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+
+        Some(Self {
+            bytes,
+            start_offset: 20,
+            num_entries,
+            entry_size,
+            string_table_index
+        })
+    }
+
+    pub fn iter(&self) -> ElfSectionIter {
+        ElfSectionIter::new(&self.bytes[self.start_offset..],
+                            self.num_entries,
+                            self.entry_size)
+    }
+
+    pub fn string_table(&self) -> Option<ElfStringTable> {
+        let section = self.iter().nth(self.string_table_index as usize)?;
+
+        // TODO(patrik): Change this to a method like read_phys_mem or
+        // something like that
+        let bytes =
+            unsafe { core::slice::from_raw_parts(section.addr as *const u8,
+                                                 section.size as usize) };
+
+        Some(ElfStringTable::new(bytes))
+    }
+}
+
+pub struct ElfSectionIter<'a> {
+    bytes: &'a [u8],
+    num_sections: u32,
+    entry_size: u32,
+    current_index: u32,
+}
+
+impl<'a> ElfSectionIter<'a> {
+    fn new(bytes: &'a [u8], num_sections: u32, entry_size: u32) -> Self {
+        Self {
+            bytes,
+            num_sections,
+            entry_size,
+            current_index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for ElfSectionIter<'a> {
+    type Item = ElfSection;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.num_sections {
+            return None;
+        }
+
+        let entry_size = self.entry_size as usize;
+        let offset = self.current_index as usize * entry_size;
+        let bytes = &self.bytes[offset..offset + entry_size];
+        let section = ElfSection::parse(bytes)?;
+
+        self.current_index += 1;
+        Some(section)
+    }
+}
+
 pub struct TagIter<'a> {
     bytes: &'a [u8],
     offset: usize
@@ -214,6 +403,34 @@ impl<'a> Iterator for TagIter<'a> {
                 Tag::BootloaderName(cmd_line)
             }
 
+            4 => {
+                // MULTIBOOT_TAG_TYPE_BASIC_MEMINFO
+
+                let start = self.offset + 8;
+                let mem_lower = u32::from_le_bytes(
+                    self.bytes[start..start + 4].try_into().ok()?);
+                let mem_upper = u32::from_le_bytes(
+                    self.bytes[start + 4..start + 8].try_into().ok()?);
+
+                Tag::BasicMemInfo(mem_lower, mem_upper)
+            }
+
+            5 => {
+                // MULTIBOOT_TAG_TYPE_BOOTDEV
+
+                let start = self.offset + 8;
+                let bios_dev = u32::from_le_bytes(
+                    self.bytes[start..start + 4].try_into().ok()?);
+                let partition = u32::from_le_bytes(
+                    self.bytes[start + 4..start + 8].try_into().ok()?);
+                let sub_partition = u32::from_le_bytes(
+                    self.bytes[start + 8..start + 12].try_into().ok()?);
+
+                let boot_dev =
+                    BootDev::new(bios_dev, partition, sub_partition);
+                Tag::BootDev(boot_dev)
+            }
+
             6 => {
                 // MULTIBOOT_TAG_TYPE_MMAP
 
@@ -230,6 +447,15 @@ impl<'a> Iterator for TagIter<'a> {
                 let framebuffer = Framebuffer::parse(bytes)?;
 
                 Tag::Framebuffer(framebuffer)
+            }
+
+            9 => {
+                // MULTIBOOT_TAG_TYPE_ELF_SECTIONS
+
+                let bytes = &self.bytes[self.offset..self.offset + tag_size];
+                let elf_sections = ElfSections::parse(bytes)?;
+
+                Tag::ElfSections(elf_sections)
             }
 
             14 => {

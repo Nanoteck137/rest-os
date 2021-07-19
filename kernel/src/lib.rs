@@ -113,6 +113,13 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             Tag::BootloaderName(s) =>
                 println!("Bootloader Name: {}", s),
 
+            Tag::BasicMemInfo(lower, upper) =>
+                println!("Basic Memory Info - Lower: {} Upper: {}",
+                         lower, upper),
+
+            Tag::BootDev(boot_dev) =>
+                println!("Boot Device: {:#x?}", boot_dev),
+
             Tag::MemoryMap(memory_map) => {
                 for entry in memory_map.iter() {
                     println!("Entry: {:#x?}", entry);
@@ -121,6 +128,17 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
             Tag::Framebuffer(framebuffer) =>
                 println!("{:#?}", framebuffer),
+
+            Tag::ElfSections(elf_sections) => {
+                let table = elf_sections.string_table()
+                    .expect("Failed to find the string table");
+
+                for section in elf_sections.iter() {
+                    println!("{} Section: {:#x?}",
+                             table.string(section.name_index).unwrap(),
+                             section);
+                }
+            }
 
             Tag::Acpi1(addr) =>
                 println!("ACPI 1.0: {:#x}", addr),
