@@ -1,14 +1,18 @@
 #![feature(asm, panic_info_message)]
 #![no_std]
 
+mod mm;
 mod multiboot;
 
 use core::panic::PanicInfo;
 use spin::Mutex;
 
+use mm::{ VirtualAddress, PhysicalAddress };
 use multiboot::{ Multiboot, Tag };
 
-const KERNEL_TEXT_OFFSET: usize = 0xffffffff80000000;
+const KERNEL_TEXT_START: usize = 0xffffffff80000000;
+const KERNEL_TEXT_SIZE: usize = 1 * 1024 * 1024 * 1024;
+const KERNEL_TEXT_END: usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
 
 fn out8(address: u16, data: u8) {
     unsafe {
@@ -92,6 +96,28 @@ fn _print_fmt(args: core::fmt::Arguments) {
     }
 }
 
+struct BootPhysicalMemory;
+
+impl mm::PhysicalMemory for BootPhysicalMemory {
+    // Read from physical memory
+    unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
+        assert!(end <= KERNEL_TEXT_END, "Reading address '{:?}' is over the kernel text area", paddr);
+
+        let new_addr = paddr.0 + KERNEL_TEXT_START;
+        core::ptr::read_volatile(new_addr as *const T)
+    }
+
+    // Write to physical memory
+    unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T) {
+    }
+
+    // Read a slice from physical memory
+    unsafe fn read_slice<'a, T>(&self, paddr: PhysicalAddress, size: usize) -> &'a [T] {
+        core::slice::from_raw_parts(paddr.0 as *const T, size)
+    }
+}
+
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
     {
@@ -103,8 +129,21 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         *ptr.offset(0) = 0x1f41;
     }
 
+    let vaddr = VirtualAddress(0xfffff8000);
+    let paddr = PhysicalAddress(1 * 1024 * 1024 * 1024 - 4);
+
+    println!("Virtual Address: {:?}", vaddr);
+    println!("Physical Address: {:?}", paddr);
+
+    use mm::PhysicalMemory;
+    let boot_physical_memory = BootPhysicalMemory {};
+    println!("Test: {}", unsafe { boot_physical_memory.read::<u32>(paddr) });
+    println!("Test: {}", unsafe { core::ptr::read_volatile(paddr.0 as *const u32) });
+
+    loop {}
+
     // Offset the address so we are inside the kernel text area
-    let multiboot_addr = multiboot_addr + KERNEL_TEXT_OFFSET;
+    let multiboot_addr = multiboot_addr + KERNEL_TEXT_START;
     let multiboot = unsafe { Multiboot::from_addr(multiboot_addr) };
 
     for tag in multiboot.tags() {
