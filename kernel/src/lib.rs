@@ -152,7 +152,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     let ptr = 0xb8000 as *mut u16;
     unsafe {
-        *ptr.offset(0) = 0x1f41;
+        for i in 0..25*80 {
+            *ptr.offset(i) = 0x0000;
+        }
     }
 
     let multiboot = unsafe {

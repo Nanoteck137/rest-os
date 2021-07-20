@@ -122,7 +122,7 @@ impl<'a> MemoryMap<'a> {
         let entry_size = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
         let _entry_version = u32::from_le_bytes(bytes[12..16].try_into().ok()?);
 
-        let entry_count = (tag_size - 16) / entry_size;
+        let entry_count = tag_size.checked_sub(16)? / entry_size;
 
         let entry_size = entry_size as usize;
         let entry_count = entry_count as usize;
@@ -158,6 +158,7 @@ pub struct Framebuffer {
     bits_per_pixel: u8,
 }
 
+#[allow(dead_code)]
 impl Framebuffer {
     fn parse(bytes: &[u8]) -> Option<Self> {
         let tag_type = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
@@ -181,6 +182,26 @@ impl Framebuffer {
             bits_per_pixel
         })
     }
+
+    pub fn addr(&self) -> usize {
+        self.addr
+    }
+
+    pub fn pitch(&self) -> u32 {
+        self.pitch
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn bits_per_pixel(&self) -> u8 {
+        self.bits_per_pixel
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +218,7 @@ pub struct ElfSection {
     entry_size: u64,
 }
 
+#[allow(dead_code)]
 impl ElfSection {
     fn parse(bytes: &[u8]) -> Option<Self> {
         assert!(bytes.len() >= 64, "ELF section mismatch length");
@@ -224,6 +246,46 @@ impl ElfSection {
             addr_align,
             entry_size,
         })
+    }
+
+    pub fn name_index(&self) -> u32 {
+        self.name_index
+    }
+
+    pub fn typ(&self) -> u32 {
+        self.typ
+    }
+
+    pub fn flags(&self) -> u64 {
+        self.flags
+    }
+
+    pub fn addr(&self) -> u64 {
+        self.addr
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    pub fn link(&self) -> u32 {
+        self.link
+    }
+
+    pub fn info(&self) -> u32 {
+        self.info
+    }
+
+    pub fn addr_align(&self) -> u64 {
+        self.addr_align
+    }
+
+    pub fn entry_size(&self) -> u64 {
+        self.entry_size
     }
 }
 
