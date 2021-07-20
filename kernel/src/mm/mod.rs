@@ -22,6 +22,11 @@ pub trait PhysicalMemory
     // Write to physical memory
     unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T);
 
-    // Read a slice from physical memory
-    unsafe fn read_slice<'a, T>(&self, paddr: PhysicalAddress, size: usize) -> &'a [T];
+    // Slice from physical memory
+    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a [T];
+
+    // Mutable Slice from physical memory
+    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a mut [T];
 }

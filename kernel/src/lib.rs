@@ -7,7 +7,7 @@ mod multiboot;
 use core::panic::PanicInfo;
 use spin::Mutex;
 
-use mm::{ VirtualAddress, PhysicalAddress };
+use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use multiboot::{ Multiboot, Tag };
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
@@ -98,11 +98,12 @@ fn _print_fmt(args: core::fmt::Arguments) {
 
 struct BootPhysicalMemory;
 
-impl mm::PhysicalMemory for BootPhysicalMemory {
+impl PhysicalMemory for BootPhysicalMemory {
     // Read from physical memory
     unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
         let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
-        assert!(end <= KERNEL_TEXT_END, "Reading address '{:?}' is over the kernel text area", paddr);
+        assert!(end <= KERNEL_TEXT_END,
+                "Reading address '{:?}' is over the kernel text area", paddr);
 
         let new_addr = paddr.0 + KERNEL_TEXT_START;
         core::ptr::read_volatile(new_addr as *const T)
@@ -110,13 +111,38 @@ impl mm::PhysicalMemory for BootPhysicalMemory {
 
     // Write to physical memory
     unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T) {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
+        assert!(end <= KERNEL_TEXT_END,
+                "Writing address '{:?}' is over the kernel text area", paddr);
+
+        let new_addr = paddr.0 + KERNEL_TEXT_START;
+        core::ptr::write_volatile(new_addr as *mut T, value)
     }
 
     // Read a slice from physical memory
-    unsafe fn read_slice<'a, T>(&self, paddr: PhysicalAddress, size: usize) -> &'a [T] {
+    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a [T]
+    {
+        let byte_length = size * core::mem::size_of::<T>();
+        let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
+        assert!(end <= KERNEL_TEXT_END,
+                "Slicing address '{:?}' is over the kernel text area", paddr);
         core::slice::from_raw_parts(paddr.0 as *const T, size)
     }
+
+    // Mutable Slice from physical memory
+    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a mut [T]
+    {
+        let byte_length = size * core::mem::size_of::<T>();
+        let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
+        assert!(end <= KERNEL_TEXT_END,
+                "Slicing address '{:?}' is over the kernel text area", paddr);
+        core::slice::from_raw_parts_mut(paddr.0 as *mut T, size)
+    }
 }
+
+static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
 
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
@@ -129,22 +155,10 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         *ptr.offset(0) = 0x1f41;
     }
 
-    let vaddr = VirtualAddress(0xfffff8000);
-    let paddr = PhysicalAddress(1 * 1024 * 1024 * 1024 - 4);
-
-    println!("Virtual Address: {:?}", vaddr);
-    println!("Physical Address: {:?}", paddr);
-
-    use mm::PhysicalMemory;
-    let boot_physical_memory = BootPhysicalMemory {};
-    println!("Test: {}", unsafe { boot_physical_memory.read::<u32>(paddr) });
-    println!("Test: {}", unsafe { core::ptr::read_volatile(paddr.0 as *const u32) });
-
-    loop {}
-
-    // Offset the address so we are inside the kernel text area
-    let multiboot_addr = multiboot_addr + KERNEL_TEXT_START;
-    let multiboot = unsafe { Multiboot::from_addr(multiboot_addr) };
+    let multiboot = unsafe {
+        Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
+                             PhysicalAddress(multiboot_addr))
+    };
 
     for tag in multiboot.tags() {
         match tag {
@@ -169,7 +183,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 println!("{:#?}", framebuffer),
 
             Tag::ElfSections(elf_sections) => {
-                let table = elf_sections.string_table()
+                let table = elf_sections.string_table(&BOOT_PHYSICAL_MEMORY)
                     .expect("Failed to find the string table");
 
                 for section in elf_sections.iter() {

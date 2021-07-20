@@ -11,6 +11,8 @@
 use core::convert::TryInto;
 use super::println;
 
+use crate::mm::{ PhysicalMemory, PhysicalAddress };
+
 #[derive(Debug)]
 pub enum Tag<'a> {
     CommandLine(&'a str),
@@ -292,14 +294,17 @@ impl<'a> ElfSections<'a> {
                             self.entry_size)
     }
 
-    pub fn string_table(&self) -> Option<ElfStringTable> {
+    pub fn string_table<P: PhysicalMemory>(&self, physical_memory: &P)
+        -> Option<ElfStringTable>
+    {
         let section = self.iter().nth(self.string_table_index as usize)?;
 
-        // TODO(patrik): Change this to a method like read_phys_mem or
-        // something like that
-        let bytes =
-            unsafe { core::slice::from_raw_parts(section.addr as *const u8,
-                                                 section.size as usize) };
+        // TODO(patrik): We need to check if the `section.addr` is inside the
+        // kernel text area or inside the lower memory region
+        let bytes = unsafe {
+            physical_memory.slice::<u8>(PhysicalAddress(section.addr as usize),
+                                        section.size as usize)
+        };
 
         Some(ElfStringTable::new(bytes))
     }
@@ -511,12 +516,15 @@ pub struct Multiboot<'a> {
 }
 
 impl<'a> Multiboot<'a> {
-    pub unsafe fn from_addr(structure_addr: usize) -> Self {
+    pub unsafe fn from_addr<P: PhysicalMemory>(physical_memory: &P,
+                                               structure_addr: PhysicalAddress)
+        -> Self
+    {
         let total_size =
-            core::ptr::read_volatile(structure_addr as *const u32);
+            physical_memory.read::<u32>(structure_addr);
 
-        let ptr = structure_addr as *const u8;
-        let bytes = core::slice::from_raw_parts(ptr, total_size as usize);
+        let bytes =
+            physical_memory.slice::<u8>(structure_addr, total_size as usize);
 
         Self {
             bytes,
