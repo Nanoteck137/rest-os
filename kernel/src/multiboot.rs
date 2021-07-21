@@ -204,10 +204,56 @@ impl Framebuffer {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum ElfSectionType {
+    Null,
+    ProgramBits,
+    SymbolTable,
+    StringTable,
+    RelocationEntriesAddends,
+    HashTable,
+    DynamicInfo,
+    Note,
+    NoBits,
+    RelocationEntries,
+    DynamicSymbolTable,
+    InitArray,
+    FiniArray,
+    PreinitArray,
+    Group,
+    ExtendedSectionIndicies,
+}
+
+impl From<u32> for ElfSectionType {
+    fn from(value: u32) -> Self {
+        return match value {
+            0x00 => ElfSectionType::Null,
+            0x01 => ElfSectionType::ProgramBits,
+            0x02 => ElfSectionType::SymbolTable,
+            0x03 => ElfSectionType::StringTable,
+            0x04 => ElfSectionType::RelocationEntriesAddends,
+            0x05 => ElfSectionType::HashTable,
+            0x06 => ElfSectionType::DynamicInfo,
+            0x07 => ElfSectionType::Note,
+            0x08 => ElfSectionType::NoBits,
+            0x09 => ElfSectionType::RelocationEntries,
+            // 0x0A - Reserved
+            0x0B => ElfSectionType::DynamicSymbolTable,
+            0x0E => ElfSectionType::InitArray,
+            0x0F => ElfSectionType::FiniArray,
+            0x10 => ElfSectionType::PreinitArray,
+            0x11 => ElfSectionType::Group,
+            0x12 => ElfSectionType::ExtendedSectionIndicies,
+
+            _ => panic!("Unknown ELF section type"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ElfSection {
-    pub name_index: u32,
-    typ: u32,
+    name_index: u32,
+    typ: ElfSectionType,
     flags: u64,
     addr: u64,
     offset: u64,
@@ -234,6 +280,8 @@ impl ElfSection {
         let addr_align = u64::from_le_bytes(bytes[48..56].try_into().ok()?);
         let entry_size = u64::from_le_bytes(bytes[56..64].try_into().ok()?);
 
+        let typ = ElfSectionType::from(typ);
+
         Some(Self {
             name_index,
             typ,
@@ -252,7 +300,7 @@ impl ElfSection {
         self.name_index
     }
 
-    pub fn typ(&self) -> u32 {
+    pub fn typ(&self) -> ElfSectionType {
         self.typ
     }
 

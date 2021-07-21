@@ -190,7 +190,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
                 for section in elf_sections.iter() {
                     println!("{} Section: {:#x?}",
-                             table.string(section.name_index).unwrap(),
+                             table.string(section.name_index()).unwrap(),
                              section);
                 }
             }
