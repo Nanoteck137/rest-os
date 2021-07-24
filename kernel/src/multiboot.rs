@@ -45,11 +45,34 @@ impl BootDev {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum MemoryMapEntryType {
+    Available,
+    Reserved,
+    AcpiReclaimable,
+    Nvs,
+    Badram,
+}
+
+impl From<u32> for MemoryMapEntryType {
+    fn from(value: u32) -> Self {
+        return match value {
+            0x01 => MemoryMapEntryType::Available,
+            0x02 => MemoryMapEntryType::Reserved,
+            0x03 => MemoryMapEntryType::AcpiReclaimable,
+            0x04 => MemoryMapEntryType::Nvs,
+            0x05 => MemoryMapEntryType::Badram,
+
+            _ => panic!("Unknown value for Memory Map entry type"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MemoryMapEntry {
     addr: u64,
     length: u64,
-    typ: u32,
+    typ: MemoryMapEntryType,
 }
 
 impl MemoryMapEntry {
@@ -57,12 +80,25 @@ impl MemoryMapEntry {
         let addr = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
         let length = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
         let typ = u32::from_le_bytes(bytes[16..20].try_into().ok()?);
+        let typ = MemoryMapEntryType::from(typ);
 
         Some(Self {
             addr,
             length,
             typ
         })
+    }
+
+    pub fn addr(&self) -> u64 {
+        self.addr
+    }
+
+    pub fn length(&self) -> u64 {
+        self.length
+    }
+
+    pub fn typ(&self) -> MemoryMapEntryType {
+        self.typ
     }
 }
 
@@ -100,7 +136,6 @@ impl<'a> Iterator for MemoryMapIter<'a> {
         Some(entry)
     }
 }
-
 
 pub struct MemoryMap<'a> {
     bytes: &'a [u8],
