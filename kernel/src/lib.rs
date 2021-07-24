@@ -8,7 +8,7 @@ use core::panic::PanicInfo;
 use spin::Mutex;
 
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
-use multiboot::{ Multiboot, Tag };
+use multiboot::{ Multiboot, Tag, MemoryMap };
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
 const KERNEL_TEXT_SIZE: usize = 1 * 1024 * 1024 * 1024;
@@ -142,6 +142,31 @@ impl PhysicalMemory for BootPhysicalMemory {
     }
 }
 
+fn display_memory_map(memory_map: MemoryMap) {
+    println!("Memory Map:");
+    for entry in memory_map.iter() {
+        let start = entry.addr();
+        let length = entry.length();
+        let end = start + length - 1;
+
+        print!("[0x{:016x}-0x{:016x}] ", start, end);
+
+        if length >= 1 * 1024 * 1024 * 1024 {
+            print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
+        } else if length >= 1 * 1024 * 1024 {
+            print!("{:>4} MiB ", length / 1024 / 1024);
+        } else if length >= 1 * 1024 {
+            print!("{:>4} KiB ", length / 1024);
+        } else {
+            print!("{:>4} B   ", length);
+        }
+
+        print!("{:?}", entry.typ());
+
+        println!();
+    }
+}
+
 static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
 
 #[no_mangle]
@@ -176,9 +201,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 println!("Boot Device: {:#x?}", boot_dev),
 
             Tag::MemoryMap(memory_map) => {
-                for entry in memory_map.iter() {
-                    println!("Entry: {:#x?}", entry);
-                }
+                display_memory_map(memory_map);
             }
 
             Tag::Framebuffer(framebuffer) =>
@@ -189,9 +212,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                     .expect("Failed to find the string table");
 
                 for section in elf_sections.iter() {
+                    /*
                     println!("{} Section: {:#x?}",
                              table.string(section.name_index()).unwrap(),
                              section);
+                    */
                 }
             }
 
