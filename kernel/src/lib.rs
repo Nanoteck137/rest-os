@@ -83,6 +83,30 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)))
 }
 
+#[macro_export]
+macro_rules! eprint {
+    ($($arg:tt)*) => {{
+        ecolor_on();
+        $crate::_print_fmt(format_args!($($arg)*));
+        ecolor_off();
+    }}
+}
+
+// Print macro that appends a newline to the end of a print
+#[macro_export]
+macro_rules! eprintln {
+    () => ($crate::eprint!("\n"));
+    ($($arg:tt)*) => ($crate::eprint!("{}\n", format_args!($($arg)*)))
+}
+
+fn ecolor_on() {
+    print!("\x1b[1;31m");
+}
+
+fn ecolor_off() {
+    print!("\x1b[0m");
+}
+
 fn _print_fmt(args: core::fmt::Arguments) {
     use core::fmt::Write;
 
@@ -230,11 +254,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 println!("Load Base Addr: {:#x}", addr),
 
             Tag::Unknown(index) =>
-                println!("Unknown index: {}", index),
+                eprintln!("Unknown index: {}", index),
         }
     }
 
-    println!("Done!");
+    println!("Done");
 
     loop {}
 }
