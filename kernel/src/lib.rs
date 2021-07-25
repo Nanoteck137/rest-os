@@ -306,6 +306,14 @@ extern {
     static _end: u32;
 }
 
+fn initialize_heap() {
+    let heap_start = unsafe { VirtualAddress(&_end as *const u32 as usize) };
+    let heap_size = 1 * 1024 * 1024;
+    unsafe {
+        ALLOCATOR.lock().init(heap_start, heap_size);
+    }
+}
+
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
     serial::initialize();
@@ -324,22 +332,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // display_multiboot_tags(&multiboot);
     display_memory_map(&multiboot);
-
-    let heap_start = unsafe { VirtualAddress(&_end as *const u32 as usize) };
-    let heap_size = 1 * 1024 * 1024;
-    unsafe {
-        ALLOCATOR.lock().init(heap_start, heap_size);
-    }
-
-    println!("Heap Start: {:?}", heap_start);
-
-    let mut test = alloc::vec::Vec::new();
-    test.push(123);
-    test.push(321);
-    test.push(1);
-    test.push(1230);
-
-    println!("Vec: {:#?}", test);
+    initialize_heap();
 
     println!("Done");
 
