@@ -6,7 +6,6 @@
 //! the display
 
 use crate::serial;
-use spin::Mutex;
 
 #[macro_export]
 macro_rules! print {
@@ -45,7 +44,5 @@ pub fn ecolor_off() {
 }
 
 pub fn _print_fmt(args: core::fmt::Arguments) {
-    use core::fmt::Write;
-
     serial::print_fmt(args);
 }

@@ -9,7 +9,6 @@
 //!     * Get accessors
 
 use core::convert::TryInto;
-use super::println;
 
 use crate::mm::{ PhysicalMemory, PhysicalAddress };
 
@@ -679,5 +678,15 @@ impl<'a> Multiboot<'a> {
 
     pub fn tags(&self) -> TagIter {
         TagIter::new(&self.bytes[self.start_offset..])
+    }
+
+    pub fn find_memory_map(&self) -> Option<MemoryMap> {
+        for tag in self.tags() {
+            if let Tag::MemoryMap(result) = tag {
+                return Some(result);
+            }
+        }
+
+        None
     }
 }

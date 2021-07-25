@@ -7,15 +7,13 @@ mod mm;
 mod multiboot;
 
 use core::panic::PanicInfo;
-use spin::Mutex;
 
-use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
-use multiboot::{ Multiboot, Tag, MemoryMap };
+use mm::{ PhysicalMemory, PhysicalAddress };
+use multiboot::{ Multiboot, Tag};
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
 const KERNEL_TEXT_SIZE: usize = 1 * 1024 * 1024 * 1024;
 const KERNEL_TEXT_END: usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
-
 
 struct BootPhysicalMemory;
 
@@ -63,7 +61,10 @@ impl PhysicalMemory for BootPhysicalMemory {
     }
 }
 
-fn display_memory_map(memory_map: MemoryMap) {
+fn display_memory_map(multiboot: &Multiboot) {
+    let memory_map = multiboot.find_memory_map()
+        .expect("Failed to find memory map");
+
     println!("Memory Map:");
     for entry in memory_map.iter() {
         let start = entry.addr();
@@ -88,6 +89,53 @@ fn display_memory_map(memory_map: MemoryMap) {
     }
 }
 
+fn display_multiboot_tags(multiboot: &Multiboot) {
+    for tag in multiboot.tags() {
+        match tag {
+            Tag::CommandLine(s) => println!("Command Line: {}", s),
+            Tag::BootloaderName(s) =>
+                println!("Bootloader Name: {}", s),
+
+            Tag::BasicMemInfo(lower, upper) =>
+                println!("Basic Memory Info - Lower: {} Upper: {}",
+                         lower, upper),
+
+            Tag::BootDev(boot_dev) =>
+                println!("Boot Device: {:#x?}", boot_dev),
+
+            Tag::MemoryMap(_memory_map) => {
+                println!("Memory Map Tag");
+            }
+
+            Tag::Framebuffer(framebuffer) =>
+                println!("{:#?}", framebuffer),
+
+            Tag::ElfSections(elf_sections) => {
+                let table = elf_sections.string_table(&BOOT_PHYSICAL_MEMORY)
+                    .expect("Failed to find the string table");
+
+                for section in elf_sections.iter() {
+                    println!("{} Section: {:#x?}",
+                             table.string(section.name_index()).unwrap(),
+                             section);
+                }
+            }
+
+            Tag::Acpi1(addr) =>
+                println!("ACPI 1.0: {:#x}", addr),
+
+            Tag::Acpi2(addr) =>
+                println!("ACPI 2.0: {:#x}", addr),
+
+            Tag::LoadBaseAddr(addr) =>
+                println!("Load Base Addr: {:#x}", addr),
+
+            Tag::Unknown(index) =>
+                eprintln!("Unknown index: {}", index),
+        }
+    }
+}
+
 static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
 
 #[no_mangle]
@@ -106,52 +154,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    for tag in multiboot.tags() {
-        match tag {
-            Tag::CommandLine(s) => println!("Command Line: {}", s),
-            Tag::BootloaderName(s) =>
-                println!("Bootloader Name: {}", s),
-
-            Tag::BasicMemInfo(lower, upper) =>
-                println!("Basic Memory Info - Lower: {} Upper: {}",
-                         lower, upper),
-
-            Tag::BootDev(boot_dev) =>
-                println!("Boot Device: {:#x?}", boot_dev),
-
-            Tag::MemoryMap(memory_map) => {
-                display_memory_map(memory_map);
-            }
-
-            Tag::Framebuffer(framebuffer) =>
-                println!("{:#?}", framebuffer),
-
-            Tag::ElfSections(elf_sections) => {
-                let table = elf_sections.string_table(&BOOT_PHYSICAL_MEMORY)
-                    .expect("Failed to find the string table");
-
-                for section in elf_sections.iter() {
-                    /*
-                    println!("{} Section: {:#x?}",
-                             table.string(section.name_index()).unwrap(),
-                             section);
-                    */
-                }
-            }
-
-            Tag::Acpi1(addr) =>
-                println!("ACPI 1.0: {:#x}", addr),
-
-            Tag::Acpi2(addr) =>
-                println!("ACPI 2.0: {:#x}", addr),
-
-            Tag::LoadBaseAddr(addr) =>
-                println!("Load Base Addr: {:#x}", addr),
-
-            Tag::Unknown(index) =>
-                eprintln!("Unknown index: {}", index),
-        }
-    }
+    // display_multiboot_tags(&multiboot);
+    display_memory_map(&multiboot);
 
     println!("Done");
 
