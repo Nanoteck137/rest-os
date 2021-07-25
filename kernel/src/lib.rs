@@ -1,4 +1,4 @@
-#![feature(asm, panic_info_message)]
+#![feature(asm, panic_info_message, const_mut_refs, alloc_error_handler)]
 #![no_std]
 
 mod serial;
@@ -6,9 +6,12 @@ mod serial;
 mod mm;
 mod multiboot;
 
-use core::panic::PanicInfo;
+extern crate alloc;
 
-use mm::{ PhysicalMemory, PhysicalAddress };
+use core::panic::PanicInfo;
+use alloc::alloc::{ GlobalAlloc, Layout };
+
+use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use multiboot::{ Multiboot, Tag};
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
@@ -136,7 +139,172 @@ fn display_multiboot_tags(multiboot: &Multiboot) {
     }
 }
 
+fn align_up(addr: usize, align: usize) -> usize {
+    (addr + align - 1) & !(align - 1)
+}
+
+pub struct Locked<A> {
+    inner: spin::Mutex<A>,
+}
+
+impl<A> Locked<A> {
+    pub const fn new(inner: A) -> Self {
+        Locked {
+            inner: spin::Mutex::new(inner),
+        }
+    }
+
+    pub fn lock(&self) -> spin::MutexGuard<A> {
+        self.inner.lock()
+    }
+}
+
+struct AllocNode {
+    size: usize,
+    next: Option<&'static mut AllocNode>
+}
+
+impl AllocNode {
+    const fn new(size: usize) -> Self {
+        Self {
+            size,
+            next: None
+        }
+    }
+
+    fn start_addr(&self) -> VirtualAddress {
+        VirtualAddress(self as *const Self as usize)
+    }
+
+    fn end_addr(&self) -> VirtualAddress {
+        self.start_addr() + self.size
+    }
+}
+
+struct Allocator {
+    head: AllocNode
+}
+
+impl Allocator {
+    pub const fn new() -> Self {
+        Self {
+            head: AllocNode::new(0)
+        }
+    }
+
+    pub unsafe fn init(&mut self,
+                       heap_start: VirtualAddress,
+                       heap_size: usize)
+    {
+        self.add_free_region(heap_start, heap_size);
+    }
+
+    unsafe fn add_free_region(&mut self, addr: VirtualAddress, size: usize) {
+        assert_eq!(align_up(addr.0, core::mem::align_of::<AllocNode>()), addr.0);
+        assert!(size >= core::mem::size_of::<AllocNode>());
+
+        let mut node = AllocNode::new(size);
+        node.next = self.head.next.take();
+        let node_ptr = addr.0 as *mut AllocNode;
+        node_ptr.write(node);
+        self.head.next = Some(&mut *node_ptr);
+    }
+
+    fn find_region(&mut self, size: usize, align: usize)
+        -> Option<(&'static mut AllocNode, VirtualAddress)>
+    {
+        let mut current = &mut self.head;
+
+        while let Some(ref mut region) = current.next {
+            if let Ok(alloc_start) = Self::alloc_from_region(&region, size, align) {
+                let next = region.next.take();
+                let ret = Some((current.next.take().unwrap(), alloc_start));
+                current.next = next;
+
+                return ret;
+            } else {
+                current = current.next.as_mut().unwrap();
+            }
+        }
+
+        None
+    }
+
+    fn alloc_from_region(region: &AllocNode, size: usize, align: usize)
+        -> Result<VirtualAddress, ()>
+    {
+        let alloc_start = align_up(region.start_addr().0, align);
+        let alloc_end = alloc_start.checked_add(size).ok_or(())?;
+
+        if alloc_end > region.end_addr().0 {
+            return Err(());
+        }
+
+        let excess_size = region.end_addr().0 - alloc_end;
+        if excess_size > 0 && excess_size < core::mem::size_of::<AllocNode>() {
+            return Err(());
+        }
+
+        Ok(VirtualAddress(alloc_start))
+    }
+
+    fn size_align(layout: Layout) -> (usize, usize) {
+        let layout = layout
+            .align_to(core::mem::align_of::<AllocNode>())
+            .expect("Failed to adjust the layout alignment")
+            .pad_to_align();
+        let size = layout.size().max(core::mem::size_of::<AllocNode>());
+        (size, layout.align())
+    }
+
+    unsafe fn alloc_memory(&mut self, layout: Layout)
+        -> Option<VirtualAddress>
+    {
+        let (size, align) = Self::size_align(layout);
+
+        if let Some((region, alloc_start)) = self.find_region(size, align) {
+            let alloc_end = alloc_start.0.checked_add(size)
+                .expect("Overflow");
+            let excess_size = region.end_addr().0 - alloc_end;
+            if excess_size > 0 {
+                self.add_free_region(VirtualAddress(alloc_end), excess_size);
+            }
+
+            Some(alloc_start)
+        } else {
+            None
+        }
+    }
+}
+
+unsafe impl GlobalAlloc for Locked<Allocator> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        println!("Trying to allocate: {:#?}", layout);
+        let result = ALLOCATOR.lock().alloc_memory(layout)
+            .expect("Failed to allocate memory");
+
+        result.0 as *mut u8
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+        todo!();
+    }
+}
+
+#[alloc_error_handler]
+fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
+    panic!("memory allocation of {} bytes failed", layout.size())
+}
+
 static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
+
+#[global_allocator]
+static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
+
+// Linker variables
+extern {
+    static _end: u32;
+}
 
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
@@ -156,6 +324,22 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // display_multiboot_tags(&multiboot);
     display_memory_map(&multiboot);
+
+    let heap_start = unsafe { VirtualAddress(&_end as *const u32 as usize) };
+    let heap_size = 1 * 1024 * 1024;
+    unsafe {
+        ALLOCATOR.lock().init(heap_start, heap_size);
+    }
+
+    println!("Heap Start: {:?}", heap_start);
+
+    let mut test = alloc::vec::Vec::new();
+    test.push(123);
+    test.push(321);
+    test.push(1);
+    test.push(1230);
+
+    println!("Vec: {:#?}", test);
 
     println!("Done");
 

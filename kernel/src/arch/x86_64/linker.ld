@@ -34,5 +34,9 @@ SECTIONS {
     .bss : AT(ADDR(.bss) - KERNEL_VMA)
     {
         *(EXCLUDE_FILE(*target/boot.o) .bss .bss.*)
+
     }
+
+    . = ALIGN(4096);
+    _end = .;
 }

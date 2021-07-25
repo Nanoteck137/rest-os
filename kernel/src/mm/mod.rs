@@ -1,8 +1,17 @@
 #[derive(Copy, Clone, PartialEq)]
 pub struct VirtualAddress(pub usize);
+
 impl core::fmt::Debug for VirtualAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "VirtualAddress({:#x})", self.0)
+    }
+}
+
+impl core::ops::Add<usize> for VirtualAddress {
+    type Output = VirtualAddress;
+
+    fn add(self, rhs: usize) -> VirtualAddress {
+        VirtualAddress(self.0 + rhs)
     }
 }
 
