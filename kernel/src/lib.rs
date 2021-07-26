@@ -280,6 +280,10 @@ impl Allocator {
             None
         }
     }
+
+    unsafe fn free_memory(&mut self, addr: VirtualAddress, size: usize) {
+        self.add_free_region(addr, size);
+    }
 }
 
 unsafe impl GlobalAlloc for Locked<Allocator> {
@@ -291,8 +295,11 @@ unsafe impl GlobalAlloc for Locked<Allocator> {
         result.0 as *mut u8
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        todo!();
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let (size, _) = Allocator::size_align(layout);
+        let addr = VirtualAddress(ptr as usize);
+        println!("Freeing memory: {:?}: {}", addr, size);
+        self.lock().free_memory(addr, size);
     }
 }
 
@@ -340,8 +347,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     // display_multiboot_tags(&multiboot);
     display_memory_map(&multiboot);
 
-    let s = multiboot.find_command_line();
-    println!("Command Line: {:?}", s);
+    println!("Command Line: {:?}", multiboot.find_command_line());
 
     println!("Done");
 
