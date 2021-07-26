@@ -8,6 +8,8 @@
 //!   * Cleanup the code
 //!     * Get accessors
 
+#![allow(dead_code)]
+
 use core::convert::TryInto;
 use alloc::string::String;
 use alloc::string::ToString;
