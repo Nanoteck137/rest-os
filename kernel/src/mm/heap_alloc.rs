@@ -1,4 +1,5 @@
 //! The kernel heap allocator
+//! Design from: https://os.phil-opp.com/allocator-designs/
 
 use super::VirtualAddress;
 use crate::util::{ Locked, align_up };
