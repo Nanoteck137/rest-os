@@ -5,7 +5,7 @@
 //! in the future we want to show the user the infomation on
 //! the display
 
-use crate::serial;
+use crate::arch;
 
 #[macro_export]
 macro_rules! print {
@@ -36,5 +36,5 @@ macro_rules! eprintln {
 }
 
 pub fn _print_fmt(args: core::fmt::Arguments) {
-    serial::print_fmt(args);
+    arch::debug_print_fmt(args);
 }

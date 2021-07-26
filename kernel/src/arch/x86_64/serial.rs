@@ -1,18 +1,6 @@
 use spin::Mutex;
 
-fn out8(address: u16, data: u8) {
-    unsafe {
-        asm!("out dx, al", in("dx") address, in("al") data);
-    }
-}
-
-fn in8(address: u16) -> u8 {
-    let value: u8;
-    unsafe {
-        asm!("in al, dx", out("al") value, in("dx") address);
-    }
-    value
-}
+use super::{ out8, in8 };
 
 struct SerialPort {
     port: u16,

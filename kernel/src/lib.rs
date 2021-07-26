@@ -1,8 +1,8 @@
 #![feature(asm, panic_info_message, const_mut_refs, alloc_error_handler)]
 #![no_std]
 
+mod arch;
 mod util;
-mod serial;
 #[macro_use] mod print;
 mod mm;
 mod multiboot;
@@ -17,8 +17,8 @@ use mm::heap_alloc::Allocator;
 use multiboot::{ Multiboot, Tag};
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
-const KERNEL_TEXT_SIZE: usize = 1 * 1024 * 1024 * 1024;
-const KERNEL_TEXT_END: usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
+const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
+const KERNEL_TEXT_END:   usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
 
 struct BootPhysicalMemory;
 
@@ -170,8 +170,7 @@ fn initialize_heap() {
 
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
-    // Initialize the serial port used for debugging
-    serial::initialize();
+    arch::initialize();
 
     // Clear the display
     let ptr = 0xb8000 as *mut u16;
@@ -195,7 +194,10 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
 
-    eprintln!("Command Line: {:?}", multiboot.find_command_line());
+    let cmd_line = multiboot.find_command_line();
+    if let Some(s) = cmd_line {
+        println!("Kernel Command Line: {}", s);
+    }
 
     // Debug print that we are done executing
     println!("Done");
