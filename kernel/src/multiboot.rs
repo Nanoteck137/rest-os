@@ -9,6 +9,8 @@
 //!     * Get accessors
 
 use core::convert::TryInto;
+use alloc::string::String;
+use alloc::string::ToString;
 
 use crate::mm::{ PhysicalMemory, PhysicalAddress };
 
@@ -684,6 +686,16 @@ impl<'a> Multiboot<'a> {
         for tag in self.tags() {
             if let Tag::MemoryMap(result) = tag {
                 return Some(result);
+            }
+        }
+
+        None
+    }
+
+    pub fn find_command_line(&self) -> Option<String> {
+        for tag in self.tags() {
+            if let Tag::CommandLine(result) = tag {
+                return Some(result.to_string());
             }
         }
 

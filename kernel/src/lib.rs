@@ -200,7 +200,8 @@ impl Allocator {
     }
 
     unsafe fn add_free_region(&mut self, addr: VirtualAddress, size: usize) {
-        assert_eq!(align_up(addr.0, core::mem::align_of::<AllocNode>()), addr.0);
+        assert_eq!(align_up(addr.0, core::mem::align_of::<AllocNode>()),
+                   addr.0);
         assert!(size >= core::mem::size_of::<AllocNode>());
 
         let mut node = AllocNode::new(size);
@@ -216,7 +217,9 @@ impl Allocator {
         let mut current = &mut self.head;
 
         while let Some(ref mut region) = current.next {
-            if let Ok(alloc_start) = Self::alloc_from_region(&region, size, align) {
+            if let Ok(alloc_start) =
+                Self::alloc_from_region(&region, size, align)
+            {
                 let next = region.next.take();
                 let ret = Some((current.next.take().unwrap(), alloc_start));
                 current.next = next;
@@ -241,7 +244,9 @@ impl Allocator {
         }
 
         let excess_size = region.end_addr().0 - alloc_end;
-        if excess_size > 0 && excess_size < core::mem::size_of::<AllocNode>() {
+        if excess_size > 0 &&
+           excess_size < core::mem::size_of::<AllocNode>()
+        {
             return Err(());
         }
 
@@ -325,6 +330,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
+    initialize_heap();
+
     let multiboot = unsafe {
         Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
                              PhysicalAddress(multiboot_addr))
@@ -332,7 +339,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // display_multiboot_tags(&multiboot);
     display_memory_map(&multiboot);
-    initialize_heap();
+
+    let s = multiboot.find_command_line();
+    println!("Command Line: {:?}", s);
 
     println!("Done");
 
