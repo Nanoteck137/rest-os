@@ -1,3 +1,5 @@
+pub mod heap_alloc;
+
 #[derive(Copy, Clone, PartialEq)]
 pub struct VirtualAddress(pub usize);
 
