@@ -137,7 +137,6 @@ impl Allocator {
 unsafe impl GlobalAlloc for Locked<Allocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // Try to allocate some memory
-        println!("Trying to allocate: {:#?}", layout);
         let result = self.lock().alloc_memory(layout)
             .expect("Failed to allocate memory");
 
@@ -150,7 +149,6 @@ unsafe impl GlobalAlloc for Locked<Allocator> {
         let (size, _) = Allocator::size_align(layout);
         // Convert the pointer to a VirtualAddress
         let addr = VirtualAddress(ptr as usize);
-        println!("Freeing memory: {:?}: {}", addr, size);
         // Free the memory
         self.lock().free_memory(addr, size);
     }

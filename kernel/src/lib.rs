@@ -10,7 +10,6 @@ mod multiboot;
 extern crate alloc;
 
 use core::panic::PanicInfo;
-use alloc::alloc::{ GlobalAlloc, Layout };
 
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
@@ -192,10 +191,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     };
 
     // display_multiboot_tags(&multiboot);
+
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
 
-    println!("Command Line: {:?}", multiboot.find_command_line());
+    eprintln!("Command Line: {:?}", multiboot.find_command_line());
 
     // Debug print that we are done executing
     println!("Done");

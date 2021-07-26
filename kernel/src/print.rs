@@ -9,7 +9,9 @@ use crate::serial;
 
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::print::_print_fmt(format_args!($($arg)*)))
+    ($($arg:tt)*) => {{
+        $crate::print::_print_fmt(format_args!($($arg)*));
+    }}
 }
 
 // Print macro that appends a newline to the end of a print
@@ -22,9 +24,7 @@ macro_rules! println {
 #[macro_export]
 macro_rules! eprint {
     ($($arg:tt)*) => {{
-        $crate::print::ecolor_on();
-        $crate::print::_print_fmt(format_args!($($arg)*));
-        $crate::print::ecolor_off();
+        $crate::print!("\x1b[31m{}\x1b[0m", format_args!($($arg)*))
     }}
 }
 
@@ -33,14 +33,6 @@ macro_rules! eprint {
 macro_rules! eprintln {
     () => ($crate::eprint!("\n"));
     ($($arg:tt)*) => ($crate::eprint!("{}\n", format_args!($($arg)*)))
-}
-
-pub fn ecolor_on() {
-    print!("\x1b[1;31m");
-}
-
-pub fn ecolor_off() {
-    print!("\x1b[0m");
 }
 
 pub fn _print_fmt(args: core::fmt::Arguments) {
