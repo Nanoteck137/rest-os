@@ -10,11 +10,15 @@ mod multiboot;
 extern crate alloc;
 
 use core::panic::PanicInfo;
+use core::convert::TryFrom;
 
 use util::Locked;
-use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
+use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress, Frame };
 use mm::heap_alloc::Allocator;
+use mm::frame_alloc::{ FrameAllocator, BootFrameAllocator };
 use multiboot::{ Multiboot, Tag};
+
+use arch::x86_64::page_table::{ PageTable, PageType };
 
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
 const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
@@ -40,6 +44,7 @@ impl PhysicalMemory for BootPhysicalMemory {
                 "Writing address '{:?}' is over the kernel text area", paddr);
 
         let new_addr = paddr.0 + KERNEL_TEXT_START;
+        println!("Writing: {:#x?}", new_addr);
         core::ptr::write_volatile(new_addr as *mut T, value)
     }
 
@@ -156,12 +161,19 @@ extern {
     static _end: u32;
 }
 
-fn initialize_heap() {
+fn heap() -> (VirtualAddress, usize) {
     // The start of the heap is at the end of the kernel image and we get a
     // reference to that from the linker script
     let heap_start = unsafe { VirtualAddress(&_end as *const u32 as usize) };
     // For now we have 1 MiB of heap we could add more if we need more
     let heap_size = 1 * 1024 * 1024;
+
+    (heap_start, heap_size)
+}
+
+fn initialize_heap() {
+    let (heap_start, heap_size) = heap();
+
     unsafe {
         // Initialize the allocator
         ALLOCATOR.lock().init(heap_start, heap_size);
@@ -191,6 +203,10 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // display_multiboot_tags(&multiboot);
 
+    let test = PhysicalAddress(0x10000);
+    let test = Frame::try_from(test);
+    println!("Test: {:?}", test);
+
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
 
@@ -198,6 +214,37 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     if let Some(s) = cmd_line {
         println!("Kernel Command Line: {}", s);
     }
+
+
+    let (heap_start, heap_size) = heap();
+    let heap_end = heap_start + heap_size;
+    let physical_frame_start = PhysicalAddress(heap_end.0 - KERNEL_TEXT_START);
+    let physical_frame_end =
+        PhysicalAddress((heap_end.0 - KERNEL_TEXT_START) + 4096 * 10);
+
+    let mut frame_allocator =
+        BootFrameAllocator::new(physical_frame_start, physical_frame_end);
+
+    let cr3 = arch::x86_64::get_cr3();
+    println!("CR3: {:#x}", cr3);
+
+    println!("Before: {:#x}", unsafe { *((0) as *const u64) });
+
+    let mut page_table =
+        unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+    unsafe {
+        page_table.map(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
+                       VirtualAddress(0), PhysicalAddress(2 * 1024 * 1024),
+                       PageType::Page2M)
+            .expect("Failed to map");
+
+        let res =
+            page_table.translate_mapping(&BOOT_PHYSICAL_MEMORY,
+                                         VirtualAddress(0));
+        println!("Mapping: {:#x?}", res);
+    }
+
+    println!("After: {:#x}", unsafe { *((0) as *const u64) });
 
     // Debug print that we are done executing
     println!("Done");

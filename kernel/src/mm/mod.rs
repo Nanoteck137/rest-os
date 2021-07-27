@@ -1,4 +1,9 @@
+use core::convert::TryFrom;
+
 pub mod heap_alloc;
+pub mod frame_alloc;
+
+pub const PAGE_SIZE: usize = 4096;
 
 #[derive(Copy, Clone, PartialEq)]
 pub struct VirtualAddress(pub usize);
@@ -19,6 +24,13 @@ impl core::ops::Add<usize> for VirtualAddress {
 
 #[derive(Copy, Clone, PartialEq)]
 pub struct PhysicalAddress(pub usize);
+
+impl From<Frame> for PhysicalAddress {
+    fn from(value: Frame) -> Self {
+        Self(value.index * PAGE_SIZE)
+    }
+}
+
 impl core::fmt::Debug for PhysicalAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "PhysicalAddress({:#x})", self.0)
@@ -40,4 +52,23 @@ pub trait PhysicalMemory
     // Mutable Slice from physical memory
     unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
         -> &'a mut [T];
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct Frame {
+    index: usize
+}
+
+impl TryFrom<PhysicalAddress> for Frame {
+    type Error = ();
+
+    fn try_from(addr: PhysicalAddress) -> Result<Self, Self::Error> {
+        if addr.0 % 4096 != 0 {
+            return Err(());
+        }
+
+        Ok(Self {
+            index: addr.0 / 4096
+        })
+    }
 }
