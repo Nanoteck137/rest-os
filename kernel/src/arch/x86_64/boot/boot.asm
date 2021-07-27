@@ -135,6 +135,11 @@ long_mode_start:
     jmp rax
 .target:
 
+    ; Move the Stack pointer up to upper memory
+    mov rax, rsp
+    add rax, 0xffffffff80000000
+    mov rsp, rax
+
     ; Pop of the Multiboot Structure pointer we pushed on previously
     pop rdi
 
