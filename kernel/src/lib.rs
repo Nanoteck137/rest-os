@@ -20,9 +20,13 @@ use multiboot::{ Multiboot, Tag};
 
 use arch::x86_64::page_table::{ PageTable, PageType };
 
+// NOTE(patrik): Same as the Linux kernel
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
 const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
 const KERNEL_TEXT_END:   usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
+
+// NOTE(patrik): Same as the Linux kernel
+const PHYSICAL_MEMORY_OFFSET: usize = 0xffff888000000000;
 
 struct BootPhysicalMemory;
 
@@ -44,7 +48,6 @@ impl PhysicalMemory for BootPhysicalMemory {
                 "Writing address '{:?}' is over the kernel text area", paddr);
 
         let new_addr = paddr.0 + KERNEL_TEXT_START;
-        println!("Writing: {:#x?}", new_addr);
         core::ptr::write_volatile(new_addr as *mut T, value)
     }
 
@@ -230,16 +233,15 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     let mut page_table =
         unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
-    unsafe {
-        page_table.map(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
-                       VirtualAddress(0), PhysicalAddress(2 * 1024 * 1024),
-                       PageType::Page2M)
-            .expect("Failed to map");
 
-        let res =
-            page_table.translate_mapping(&BOOT_PHYSICAL_MEMORY,
-                                         VirtualAddress(0));
-        println!("Mapping: {:#x?}", res);
+    unsafe {
+        for offset in (0..4 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
+            let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_OFFSET);
+            let paddr = PhysicalAddress(offset);
+            page_table.map(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
+                           vaddr, paddr, PageType::Page2M)
+                .expect("Failed to map");
+        }
     }
 
     // Debug print that we are done executing
