@@ -1,5 +1,8 @@
 //! Handles all the page table code for creating and modifying page tables
 //! Code inspired from: `https://github.com/gamozolabs/chocolate_milk/`
+//! TODO(patrik):
+//!   * Make errors better
+//!   * When mapping check the vaddr and paddr so thay are aligned
 
 #![allow(dead_code)]
 

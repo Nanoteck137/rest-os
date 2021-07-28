@@ -235,7 +235,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
 
     unsafe {
-        for offset in (0..4 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
+        for offset in (0..8 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
             let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_OFFSET);
             let paddr = PhysicalAddress(offset);
             page_table.map(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
