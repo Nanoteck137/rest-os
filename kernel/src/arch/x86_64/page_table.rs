@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
-use crate::mm::PAGE_SIZE;
 use crate::mm::frame_alloc::FrameAllocator;
 
 use crate::println;
@@ -26,7 +25,7 @@ pub enum PageType {
 }
 
 #[repr(C, packed)]
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Entry(usize);
 
 impl Entry {
@@ -118,7 +117,7 @@ impl PageTable {
             p1: None,
         };
 
-        let (p4, p3, p2, p1, off) = PageTable::index(vaddr);
+        let (p4, p3, p2, p1, _) = PageTable::index(vaddr);
 
         let indicies = [
             p4, p3, p2, p1

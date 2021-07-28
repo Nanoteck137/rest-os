@@ -47,7 +47,7 @@ impl FrameAllocator for BootFrameAllocator {
         Frame::try_from(result).ok()
     }
 
-    fn free_frame(&mut self, frame: Frame) {
+    fn free_frame(&mut self, _frame: Frame) {
         panic!("Can't free frames using the BootFrameAllocator");
     }
 }

@@ -15,7 +15,7 @@ use core::convert::TryFrom;
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress, Frame };
 use mm::heap_alloc::Allocator;
-use mm::frame_alloc::{ FrameAllocator, BootFrameAllocator };
+use mm::frame_alloc::BootFrameAllocator;
 use multiboot::{ Multiboot, Tag};
 
 use arch::x86_64::page_table::{ PageTable, PageType };
@@ -99,7 +99,7 @@ fn display_memory_map(multiboot: &Multiboot) {
     }
 }
 
-fn display_multiboot_tags(multiboot: &Multiboot) {
+fn _display_multiboot_tags(multiboot: &Multiboot) {
     for tag in multiboot.tags() {
         match tag {
             Tag::CommandLine(s) => println!("Command Line: {}", s),
@@ -228,8 +228,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     let cr3 = arch::x86_64::get_cr3();
     println!("CR3: {:#x}", cr3);
 
-    println!("Before: {:#x}", unsafe { *((0) as *const u64) });
-
     let mut page_table =
         unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
     unsafe {
@@ -243,8 +241,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                                          VirtualAddress(0));
         println!("Mapping: {:#x?}", res);
     }
-
-    println!("After: {:#x}", unsafe { *((0) as *const u64) });
 
     // Debug print that we are done executing
     println!("Done");
