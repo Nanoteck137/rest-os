@@ -6,8 +6,6 @@
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
 use crate::mm::frame_alloc::FrameAllocator;
 
-use crate::println;
-
 const PAGE_PRESENT:         usize = 1 << 0;
 const PAGE_WRITE:           usize = 1 << 1;
 const PAGE_USER:            usize = 1 << 2;
@@ -126,7 +124,6 @@ impl PageTable {
         let mut table = self.table;
 
         for (depth, &index) in indicies.iter().enumerate() {
-            println!("Table: {:#x?}", table);
             let entry_off = index * core::mem::size_of::<Entry>();
             let entry_addr = PhysicalAddress(table.0 + entry_off);
 
@@ -193,7 +190,7 @@ impl PageTable {
             if entries[index].is_none() {
                 let new_table = frame_allocator.alloc_frame()?;
                 let new_table = PhysicalAddress::from(new_table);
-                println!("Allocating new table: {:?}", new_table);
+                core::ptr::write_bytes(new_table.0 as *mut u8, 0, 4096);
 
                 let addr = entries[index - 1].unwrap();
 
@@ -217,8 +214,7 @@ impl PageTable {
         if page_type != PageType::Page4K {
             entry.set_huge(true);
         }
-        println!("New Entry: {:#x?}", entry);
-        println!("Target: {:?}", entries[depth - 1].unwrap());
+
         physical_memory.write::<Entry>(entries[depth - 1].unwrap(), entry);
 
         Some(())
