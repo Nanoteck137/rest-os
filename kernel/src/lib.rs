@@ -206,10 +206,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // display_multiboot_tags(&multiboot);
 
-    let test = PhysicalAddress(0x10000);
-    let test = Frame::try_from(test);
-    println!("Test: {:?}", test);
-
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
 
@@ -217,7 +213,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     if let Some(s) = cmd_line {
         println!("Kernel Command Line: {}", s);
     }
-
 
     let (heap_start, heap_size) = heap();
     let heap_end = heap_start + heap_size;
