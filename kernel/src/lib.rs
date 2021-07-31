@@ -1,26 +1,30 @@
+//! This is the main kernel file this has the kernel initializing code and
+//! this is where the boot code is gonna call into.
+
 #![feature(asm, panic_info_message, const_mut_refs, alloc_error_handler)]
 #![no_std]
 
+/// Poll in all the modules that the kernel has
 mod arch;
 mod util;
 #[macro_use] mod print;
 mod mm;
 mod multiboot;
 
+// Pull in the `alloc` create
 extern crate alloc;
 
 use core::panic::PanicInfo;
-use core::convert::TryFrom;
 
 use util::Locked;
-use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress, Frame };
+use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::heap_alloc::Allocator;
 use mm::frame_alloc::BootFrameAllocator;
 use multiboot::{ Multiboot, Tag};
 
 use arch::x86_64::page_table::{ PageTable, PageType };
 
-// NOTE(patrik): Same as the Linux kernel
+// NOTE(patrik): Almost the same as the Linux kernel
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;
 const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
 const KERNEL_TEXT_END:   usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
