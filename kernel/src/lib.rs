@@ -30,7 +30,8 @@ const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
 const KERNEL_TEXT_END:   usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
 
 // NOTE(patrik): Same as the Linux kernel
-const PHYSICAL_MEMORY_OFFSET: usize = 0xffff888000000000;
+const PHYSICAL_MEMORY_OFFSET:     usize = 0xffff888000000000;
+const PHYSICAL_MEMORY_OFFSET_END: usize = 0xffff890000000000;
 
 struct BootPhysicalMemory;
 
@@ -63,7 +64,9 @@ impl PhysicalMemory for BootPhysicalMemory {
         let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
         assert!(end <= KERNEL_TEXT_END,
                 "Slicing address '{:?}' is over the kernel text area", paddr);
-        core::slice::from_raw_parts(paddr.0 as *const T, size)
+
+        let new_addr = paddr.0 + KERNEL_TEXT_START;
+        core::slice::from_raw_parts(new_addr as *const T, size)
     }
 
     // Mutable Slice from physical memory
@@ -74,7 +77,63 @@ impl PhysicalMemory for BootPhysicalMemory {
         let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
         assert!(end <= KERNEL_TEXT_END,
                 "Slicing address '{:?}' is over the kernel text area", paddr);
-        core::slice::from_raw_parts_mut(paddr.0 as *mut T, size)
+
+        let new_addr = paddr.0 + KERNEL_TEXT_START;
+        core::slice::from_raw_parts_mut(new_addr as *mut T, size)
+    }
+}
+
+struct KernelPhysicalMemory;
+
+impl PhysicalMemory for KernelPhysicalMemory {
+    // Read from physical memory
+    unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
+            PHYSICAL_MEMORY_OFFSET;
+        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
+                "Reading address '{:?}' is over the physical memory area",
+                paddr);
+
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
+        core::ptr::read_volatile(new_addr as *const T)
+    }
+
+    // Write to physical memory
+    unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T) {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
+            PHYSICAL_MEMORY_OFFSET;
+        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
+                "Writing address '{:?}' is over the physical memory area",
+                paddr);
+
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
+        core::ptr::write_volatile(new_addr as *mut T, value)
+    }
+
+    // Read a slice from physical memory
+    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a [T]
+    {
+        let byte_length = size * core::mem::size_of::<T>();
+        let end = (paddr.0 + byte_length - 1) + PHYSICAL_MEMORY_OFFSET;
+        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
+                "Slicing address '{:?}' is over the physical memory area", paddr);
+
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
+        core::slice::from_raw_parts(new_addr as *const T, size)
+    }
+
+    // Mutable Slice from physical memory
+    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
+        -> &'a mut [T]
+    {
+        let byte_length = size * core::mem::size_of::<T>();
+        let end = (paddr.0 + byte_length - 1) + PHYSICAL_MEMORY_OFFSET;
+        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
+                "Slicing address '{:?}' is over the physical memory area",
+                paddr);
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
+        core::slice::from_raw_parts_mut(new_addr as *mut T, size)
     }
 }
 
@@ -159,6 +218,7 @@ fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
 }
 
 static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
+static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory = KernelPhysicalMemory {};
 
 #[global_allocator]
 static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
@@ -242,6 +302,17 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 .expect("Failed to map");
         }
     }
+
+    // NOTE(patrik): Test the mapping and the new kernel physical memory access
+    // Get access to the multiboot structure
+    let multiboot = unsafe {
+        Multiboot::from_addr(&KERNEL_PHYSICAL_MEMORY,
+                             PhysicalAddress(multiboot_addr))
+    };
+
+
+    // Display the memory map from the multiboot structure
+    display_memory_map(&multiboot);
 
     // Debug print that we are done executing
     println!("Done");

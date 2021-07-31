@@ -1,6 +1,5 @@
 //! Module for some utility structs and functions
 
-
 pub struct Locked<A> {
     inner: spin::Mutex<A>,
 }
