@@ -228,10 +228,14 @@ extern {
     static _end: u32;
 }
 
+fn get_kernel_end() -> VirtualAddress {
+    unsafe { VirtualAddress(&_end as *const u32 as usize) }
+}
+
 fn heap() -> (VirtualAddress, usize) {
     // The start of the heap is at the end of the kernel image and we get a
     // reference to that from the linker script
-    let heap_start = unsafe { VirtualAddress(&_end as *const u32 as usize) };
+    let heap_start = get_kernel_end();
     // For now we have 1 MiB of heap we could add more if we need more
     let heap_size = 1 * 1024 * 1024;
 
@@ -280,9 +284,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     let (heap_start, heap_size) = heap();
     let heap_end = heap_start + heap_size;
-    let physical_frame_start = PhysicalAddress(heap_end.0 - KERNEL_TEXT_START);
-    let physical_frame_end =
-        PhysicalAddress((heap_end.0 - KERNEL_TEXT_START) + 4096 * 10);
+    let physical_heap_end = PhysicalAddress(heap_end.0 - KERNEL_TEXT_START);
 
     let mut frame_allocator =
         BitmapFrameAllocator::new();
@@ -295,7 +297,18 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
 
+    // TODO(patrik): Change this
+    let kernel_start = PhysicalAddress(0x100000);
+    let kernel_end = physical_heap_end;
+    frame_allocator.lock_region(kernel_start, kernel_end.0 - kernel_start.0);
+
     use mm::frame_alloc::FrameAllocator;
+
+    println!("Frame: {:?}", frame_allocator.alloc_frame());
+    println!("Frame: {:?}", frame_allocator.alloc_frame());
+    let frame = frame_allocator.alloc_frame().unwrap();
+    println!("Frame: {:?}", frame);
+    frame_allocator.free_frame(frame);
     println!("Frame: {:?}", frame_allocator.alloc_frame());
 
     let cr3 = arch::x86_64::get_cr3();

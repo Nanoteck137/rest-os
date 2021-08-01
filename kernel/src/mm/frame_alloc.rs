@@ -58,6 +58,8 @@ struct BitmapRegion {
 
 impl BitmapRegion {
     fn new(start: PhysicalAddress, num_frames: usize) -> Self {
+        assert!(start.0 % PAGE_SIZE == 0,
+                "BitmapRegion::new: ´start´ needs to be Page aligned");
         assert!(num_frames > 0, "Region cannot have 0 frames");
 
         let bitmap_size = num_frames / 8 + 1;
@@ -78,12 +80,13 @@ impl BitmapRegion {
     }
 
     fn lock_frames(&mut self, start: PhysicalAddress, num_frames: usize) {
+        assert!(start.0 % PAGE_SIZE == 0,
+                "BitmapRegion::lock_frames: ´start´ needs to be Page aligned");
         let start = start.0 - self.start.0;
         let start = start / 4096;
         let end = start + num_frames;
 
         for i in start..end {
-            println!("Index: {}", i);
             self.bitmap.set_index(i, true);
         }
     }
@@ -101,6 +104,16 @@ impl BitmapRegion {
         }
 
         None
+    }
+
+    fn free_frame(&mut self, frame: Frame) {
+        let addr = PhysicalAddress::from(frame);
+        assert!(addr >= self.start_addr() && addr <= self.end_addr());
+
+        let addr = addr.0 - self.start.0;
+        let index = addr / PAGE_SIZE;
+
+        self.bitmap.set_index(index, false);
     }
 }
 
@@ -177,8 +190,14 @@ impl FrameAllocator for BitmapFrameAllocator {
         return None;
     }
 
-    fn free_frame(&mut self, _frame: Frame) {
-        todo!();
+    fn free_frame(&mut self, frame: Frame) {
+        let addr = PhysicalAddress::from(frame);
+        for region in self.bitmap_regions.iter_mut() {
+            if addr >= region.start_addr() && addr <= region.end_addr() {
+                region.free_frame(frame);
+                return;
+            }
+        }
     }
 }
 
