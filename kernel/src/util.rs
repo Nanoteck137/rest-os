@@ -16,6 +16,10 @@ impl<A> Locked<A> {
     }
 }
 
-pub fn align_up(addr: usize, align: usize) -> usize {
-    (addr + align - 1) & !(align - 1)
+pub fn align_up(value: usize, align: usize) -> usize {
+    (value + align - 1) & !(align - 1)
+}
+
+pub fn align_down(value: usize, align: usize) -> usize {
+    value & !(align - 1)
 }

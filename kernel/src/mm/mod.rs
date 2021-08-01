@@ -22,7 +22,7 @@ impl core::ops::Add<usize> for VirtualAddress {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub struct PhysicalAddress(pub usize);
 
 impl From<Frame> for PhysicalAddress {

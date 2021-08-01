@@ -12,14 +12,14 @@ mod mm;
 mod multiboot;
 
 // Pull in the `alloc` create
-extern crate alloc;
+#[macro_use] extern crate alloc;
 
 use core::panic::PanicInfo;
 
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::heap_alloc::Allocator;
-use mm::frame_alloc::BootFrameAllocator;
+use mm::frame_alloc::BitmapFrameAllocator;
 use multiboot::{ Multiboot, Tag};
 
 use arch::x86_64::page_table::{ PageTable, PageType };
@@ -285,7 +285,18 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         PhysicalAddress((heap_end.0 - KERNEL_TEXT_START) + 4096 * 10);
 
     let mut frame_allocator =
-        BootFrameAllocator::new(physical_frame_start, physical_frame_end);
+        BitmapFrameAllocator::new();
+    unsafe {
+        frame_allocator.init(multiboot.find_memory_map()
+            .expect("Failed to find memory map"));
+    }
+
+    println!("Frame Allocator: {:#?}", frame_allocator);
+
+    frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
+
+    use mm::frame_alloc::FrameAllocator;
+    println!("Frame: {:?}", frame_allocator.alloc_frame());
 
     let cr3 = arch::x86_64::get_cr3();
     println!("CR3: {:#x}", cr3);
@@ -303,15 +314,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
-    // NOTE(patrik): Test the mapping and the new kernel physical memory access
-    // Get access to the multiboot structure
     let multiboot = unsafe {
         Multiboot::from_addr(&KERNEL_PHYSICAL_MEMORY,
                              PhysicalAddress(multiboot_addr))
     };
 
-
-    // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
 
     // Debug print that we are done executing
