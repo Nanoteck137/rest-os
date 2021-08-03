@@ -59,6 +59,10 @@ static GDT: GDT = GDT {
     user_data: GDTEntry::new(0, 0, 0x9a, 0x0a),
 };
 
+extern "C" {
+    fn load_gdt(gdt: &GDTDescriptor);
+}
+
 pub(super) fn initialize() {
     // Define the GDT descriptor so it points to the our custom GDT table
     let gdt = GDTDescriptor {
@@ -68,6 +72,33 @@ pub(super) fn initialize() {
 
     // Load the GDT
     unsafe {
-        asm!("lgdt [{}]", in(reg) &gdt as *const _);
+        load_gdt(&gdt);
     }
 }
+
+global_asm!(r#"
+.global
+load_gdt:
+    // Load the GDT
+    lgdt [rdi]
+
+    // Setup the segments
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    // Setup the code segment by far jumping to the return address
+    pop rdi
+    // Offset to the code segment inside the GDT
+    mov rax, 0x08
+
+    // Push the "arguments" for retfq
+    push rax
+    push rdi
+
+    // Return to the return address
+    retfq
+"#);
