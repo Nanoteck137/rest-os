@@ -326,12 +326,19 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     display_memory_map(&multiboot);
 
     // Debug print that we are done executing
-    println!("Done");
 
     unsafe {
+        // NOTE(patrik): Mask off the pic so we don't get those interrupts
+        // We need to program the pic so the offsets inside the pic for
+        // interrupts are correct
+        asm!("mov al, 0xff
+            out 0xa1, al
+            out 0x21, al", lateout("rax") _);
         asm!("sti");
-        asm!("int 9");
+        asm!("int 123");
     }
+
+    println!("Done");
 
     loop {}
 }
