@@ -318,15 +318,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
-    let multiboot = unsafe {
-        Multiboot::from_addr(&KERNEL_PHYSICAL_MEMORY,
-                             PhysicalAddress(multiboot_addr))
-    };
-
-    display_memory_map(&multiboot);
-
-    // Debug print that we are done executing
-
     unsafe {
         // NOTE(patrik): Mask off the pic so we don't get those interrupts
         // We need to program the pic so the offsets inside the pic for
@@ -338,6 +329,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         asm!("int 123");
     }
 
+    // Debug print that we are done executing
     println!("Done");
 
     loop {}

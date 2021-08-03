@@ -57,8 +57,6 @@ pub(super) fn initialize() {
         for i in 0..256 {
             IDT.entries[i] = IDTEntry::new(0x8, INT_HANDLERS[i] as u64, 0, 0xe, 0);
         }
-
-        println!("Entry: {:#x?}", IDT.entries[0]);
     }
 
     let descriptor = IDTDescriptor {
@@ -111,10 +109,6 @@ unsafe extern fn interrupt_handler(number: u8,
     println!("Frame: {:#x?}", frame);
     println!("Error: {:#x?}", error);
     println!("Regs: {:#x?}", regs);
-
-    if number == 13 {
-        loop {}
-    }
 }
 
 const INT_HANDLERS: [unsafe extern fn(); 256] = [
