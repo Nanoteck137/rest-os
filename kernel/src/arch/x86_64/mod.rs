@@ -3,7 +3,9 @@
 #![allow(dead_code)]
 
 pub mod page_table;
-pub mod serial;
+
+mod serial;
+mod gdt;
 
 pub fn out8(address: u16, data: u8) {
     unsafe {
@@ -37,6 +39,7 @@ pub fn set_cr3(value: u64) {
 
 pub fn initialize() {
     serial::initialize();
+    gdt::initialize();
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {

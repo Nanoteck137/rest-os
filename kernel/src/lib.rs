@@ -117,7 +117,8 @@ impl PhysicalMemory for KernelPhysicalMemory {
         let byte_length = size * core::mem::size_of::<T>();
         let end = (paddr.0 + byte_length - 1) + PHYSICAL_MEMORY_OFFSET;
         assert!(end < PHYSICAL_MEMORY_OFFSET_END,
-                "Slicing address '{:?}' is over the physical memory area", paddr);
+                "Slicing address '{:?}' is over the physical memory area",
+                paddr);
 
         let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
         core::slice::from_raw_parts(new_addr as *const T, size)
@@ -293,23 +294,12 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             .expect("Failed to find memory map"));
     }
 
-    println!("Frame Allocator: {:#?}", frame_allocator);
-
     frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
 
     // TODO(patrik): Change this
     let kernel_start = PhysicalAddress(0x100000);
     let kernel_end = physical_heap_end;
     frame_allocator.lock_region(kernel_start, kernel_end.0 - kernel_start.0);
-
-    use mm::frame_alloc::FrameAllocator;
-
-    println!("Frame: {:?}", frame_allocator.alloc_frame());
-    println!("Frame: {:?}", frame_allocator.alloc_frame());
-    let frame = frame_allocator.alloc_frame().unwrap();
-    println!("Frame: {:?}", frame);
-    frame_allocator.free_frame(frame);
-    println!("Frame: {:?}", frame_allocator.alloc_frame());
 
     let cr3 = arch::x86_64::get_cr3();
     println!("CR3: {:#x}", cr3);
