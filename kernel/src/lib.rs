@@ -1,7 +1,8 @@
 //! This is the main kernel file this has the kernel initializing code and
 //! this is where the boot code is gonna call into.
 
-#![feature(asm, panic_info_message, const_mut_refs, alloc_error_handler)]
+#![feature(panic_info_message, const_mut_refs, alloc_error_handler)]
+#![feature(asm, global_asm)]
 #![no_std]
 
 /// Poll in all the modules that the kernel has

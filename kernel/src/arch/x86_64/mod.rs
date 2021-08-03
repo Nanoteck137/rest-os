@@ -6,6 +6,7 @@ pub mod page_table;
 
 mod serial;
 mod gdt;
+mod interrupts;
 
 pub fn out8(address: u16, data: u8) {
     unsafe {
@@ -40,6 +41,7 @@ pub fn set_cr3(value: u64) {
 pub fn initialize() {
     serial::initialize();
     gdt::initialize();
+    interrupts::initialize();
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
