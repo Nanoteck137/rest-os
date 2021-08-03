@@ -318,17 +318,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
-    unsafe {
-        // NOTE(patrik): Mask off the pic so we don't get those interrupts
-        // We need to program the pic so the offsets inside the pic for
-        // interrupts are correct
-        asm!("mov al, 0xff
-            out 0xa1, al
-            out 0x21, al", lateout("rax") _);
-        asm!("sti");
-        asm!("int 123");
-    }
-
     // Debug print that we are done executing
     println!("Done");
 
