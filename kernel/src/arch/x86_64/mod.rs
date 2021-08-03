@@ -22,6 +22,16 @@ pub fn in8(address: u16) -> u8 {
     value
 }
 
+pub fn get_cr2() -> u64 {
+    let value: u64;
+
+    unsafe {
+        asm!("mov rax, cr2", out("rax") value);
+    }
+
+    value
+}
+
 pub fn get_cr3() -> u64 {
     let value: u64;
 

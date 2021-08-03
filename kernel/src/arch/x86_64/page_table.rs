@@ -155,11 +155,11 @@ impl PageTable {
         Some(result)
     }
 
-    pub unsafe fn map<F, P>(&mut self,
-                            frame_allocator: &mut F, physical_memory: &P,
-                            vaddr: VirtualAddress,
-                            paddr: PhysicalAddress,
-                            page_type: PageType)
+    pub unsafe fn map_raw<F, P>(&mut self,
+                                frame_allocator: &mut F, physical_memory: &P,
+                                vaddr: VirtualAddress,
+                                paddr: PhysicalAddress,
+                                page_type: PageType)
         -> Option<()>
 
         where F: FrameAllocator,
@@ -219,6 +219,36 @@ impl PageTable {
         }
 
         physical_memory.write::<Entry>(entries[depth - 1].unwrap(), entry);
+
+        Some(())
+    }
+
+    pub unsafe fn unmap_raw<F, P>(&mut self,
+                                  frame_allocator: &mut F, physical_memory: &P,
+                                  vaddr: VirtualAddress)
+        -> Option<()>
+
+        where F: FrameAllocator,
+              P: PhysicalMemory
+    {
+        let mapping = self.translate_mapping(physical_memory, vaddr)?;
+
+        if let Some(p2) = mapping.p2 {
+            let mut entry = physical_memory.read::<Entry>(p2);
+            entry.set_present(false);
+
+            physical_memory.write::<Entry>(p2, entry);
+
+            let table_addr = PhysicalAddress(p2.0 & !0xfff);
+            for i in 0..512 {
+                let entry_off = i * core::mem::size_of::<Entry>();
+                let entry_addr = PhysicalAddress(table_addr.0 + entry_off);
+                let entry = physical_memory.read::<Entry>(entry_addr);
+                println!("{} Entry: {:#x?}", i, entry.0);
+            }
+        }
+
+        println!("Mapping: {:#x?}", mapping);
 
         Some(())
     }

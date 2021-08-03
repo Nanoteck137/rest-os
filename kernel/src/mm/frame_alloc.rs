@@ -97,6 +97,9 @@ impl BitmapRegion {
                 self.bitmap.set_index(i, true);
 
                 let addr = PhysicalAddress(i * 4096 + self.start.0);
+                if addr.0 == 0x105000 {
+                    panic!("Woot");
+                }
                 let frame = Frame::try_from(addr)
                     .expect("Failed to convert to frame");
                 return Some(frame);

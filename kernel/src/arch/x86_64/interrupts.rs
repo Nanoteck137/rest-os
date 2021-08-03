@@ -3,6 +3,8 @@
 //! but we needed to modify the code because that assembly code used
 //! MSVC calling convention but we use the SysV ABI calling convention
 
+use crate::mm::VirtualAddress;
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 struct IDTEntry {
@@ -109,6 +111,11 @@ unsafe extern fn interrupt_handler(number: u8,
     println!("Frame: {:#x?}", frame);
     println!("Error: {:#x?}", error);
     println!("Regs: {:#x?}", regs);
+
+    if number == 14 {
+        let cr2 = super::get_cr2() as usize;
+        panic!("Page Fault at address: {:?}", VirtualAddress(cr2));
+    }
 }
 
 const INT_HANDLERS: [unsafe extern fn(); 256] = [
