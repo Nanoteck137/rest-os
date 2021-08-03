@@ -6,9 +6,9 @@
 #![no_std]
 
 /// Poll in all the modules that the kernel has
+#[macro_use] mod print;
 mod arch;
 mod util;
-#[macro_use] mod print;
 mod mm;
 mod multiboot;
 
@@ -327,6 +327,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // Debug print that we are done executing
     println!("Done");
+
+    unsafe {
+        asm!("sti");
+        asm!("int 9");
+    }
 
     loop {}
 }
