@@ -6,8 +6,11 @@
 
 #![allow(dead_code)]
 
-use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
+use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory, Frame };
+use crate::mm::PAGE_SIZE;
 use crate::mm::frame_alloc::FrameAllocator;
+
+use core::convert::TryFrom;
 
 const PAGE_PRESENT:         usize = 1 << 0;
 const PAGE_WRITE:           usize = 1 << 1;
@@ -223,6 +226,53 @@ impl PageTable {
         Some(())
     }
 
+    unsafe fn can_free_table<P>(physical_memory: &P,
+                                table_addr: PhysicalAddress)
+        -> bool
+        where P: PhysicalMemory
+    {
+        assert!(table_addr.0 % PAGE_SIZE == 0,
+                "table_addr: need to be page aligned");
+        let mut result = true;
+
+        for i in 0..512 {
+            let entry_off = i * core::mem::size_of::<Entry>();
+            let entry_addr = PhysicalAddress(table_addr.0 + entry_off);
+            let entry = physical_memory.read::<Entry>(entry_addr);
+
+            if entry.is_present() {
+                result = false;
+                break;
+            }
+        }
+
+        result
+    }
+
+    pub unsafe fn check_free_table<F, P>(frame_allocator: &mut F,
+                                         physical_memory: &P,
+                                         table_addr: PhysicalAddress)
+        -> bool
+
+        where F: FrameAllocator,
+              P: PhysicalMemory
+    {
+        let table_addr = PhysicalAddress(table_addr.0 & !0xfff);
+        if Self::can_free_table(physical_memory, table_addr) {
+            let frame = Frame::try_from(table_addr)
+                .expect("Failed to convert to Frame");
+            frame_allocator.free_frame(frame);
+
+            return true;
+        }
+
+        false
+    }
+
+    unsafe fn invalidate_page(vaddr: VirtualAddress) {
+        asm!("invlpg [{}]", in(reg) vaddr.0);
+    }
+
     pub unsafe fn unmap_raw<F, P>(&mut self,
                                   frame_allocator: &mut F, physical_memory: &P,
                                   vaddr: VirtualAddress)
@@ -232,23 +282,62 @@ impl PageTable {
               P: PhysicalMemory
     {
         let mapping = self.translate_mapping(physical_memory, vaddr)?;
+        assert!(mapping.p2.is_some(), "No support for 1GiB mapping");
 
-        if let Some(p2) = mapping.p2 {
+        if let Some(p1) = mapping.p1 {
+            let mut entry = physical_memory.read::<Entry>(p1);
+            entry.set_present(false);
+            physical_memory.write::<Entry>(p1, entry);
+
+            Self::invalidate_page(vaddr);
+
+            let p2 = mapping.p2.expect("No P2 table?");
+            let p3 = mapping.p3.expect("No P3 table?");
+            let p4 = mapping.p4.expect("No P4 table?");
+
+            let mappings = [
+                p1, p2, p3, p4
+            ];
+
+            for i in 0..mappings.len() - 1 {
+                let current_mapping = mappings[i];
+                let next_mapping = mappings[i + 1];
+                if Self::check_free_table(frame_allocator, physical_memory,
+                                          current_mapping)
+                {
+                    let mut entry =
+                        physical_memory.read::<Entry>(next_mapping);
+                    entry.set_present(false);
+                    physical_memory.write::<Entry>(next_mapping, entry);
+                }
+            }
+        } else if let Some(p2) = mapping.p2 {
             let mut entry = physical_memory.read::<Entry>(p2);
             entry.set_present(false);
-
             physical_memory.write::<Entry>(p2, entry);
 
-            let table_addr = PhysicalAddress(p2.0 & !0xfff);
-            for i in 0..512 {
-                let entry_off = i * core::mem::size_of::<Entry>();
-                let entry_addr = PhysicalAddress(table_addr.0 + entry_off);
-                let entry = physical_memory.read::<Entry>(entry_addr);
-                println!("{} Entry: {:#x?}", i, entry.0);
+            Self::invalidate_page(vaddr);
+
+            let p3 = mapping.p3.expect("No P3 table?");
+            let p4 = mapping.p4.expect("No P4 table?");
+
+            let mappings = [
+                p2, p3, p4
+            ];
+
+            for i in 0..mappings.len() - 1 {
+                let current_mapping = mappings[i];
+                let next_mapping = mappings[i + 1];
+                if Self::check_free_table(frame_allocator, physical_memory,
+                                          current_mapping)
+                {
+                    let mut entry =
+                        physical_memory.read::<Entry>(next_mapping);
+                    entry.set_present(false);
+                    physical_memory.write::<Entry>(next_mapping, entry);
+                }
             }
         }
-
-        println!("Mapping: {:#x?}", mapping);
 
         Some(())
     }

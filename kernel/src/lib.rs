@@ -309,6 +309,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
 
     unsafe {
+        // Search for the highest address inside the memory map so we can
+        // map all of the physical memory
         let highest_address = {
             let memory_map = multiboot.find_memory_map()
                 .expect("Failed to find memory map");
@@ -321,6 +323,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             address as usize
         };
 
+        // Map all of Physical memory at PHYSICAL_MEMORY_OFFSET
         for offset in (0..=highest_address).step_by(2 * 1024 * 1024) {
             let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_OFFSET);
             let paddr = PhysicalAddress(offset);
@@ -329,16 +332,12 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 .expect("Failed to map");
         }
 
-        let ptr = 0 as *const u32;
-        println!("Value: {}", *ptr);
-
-        page_table.unmap_raw(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
-                             VirtualAddress(0));
-
-        let addr = VirtualAddress(0);
-        asm!("invlpg [{}]", in(reg) addr.0);
-
-        println!("Value: {}", *ptr);
+        // Unmap the mappings from 0-1GiB those mappings are from the boot and
+        // we need to unmap those
+        for offset in (0..1 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
+            page_table.unmap_raw(&mut frame_allocator, &KERNEL_PHYSICAL_MEMORY,
+                                 VirtualAddress(offset));
+        }
     }
 
     // Debug print that we are done executing
