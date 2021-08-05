@@ -8,14 +8,16 @@ struct SerialPort {
 
 impl SerialPort {
     fn new(port: u16) -> Self {
-        out8(port + 1, 0x00);    // Disable all interrupts
-        out8(port + 3, 0x80);    // Enable DLAB (set baud rate divisor)
-        out8(port + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
-        out8(port + 1, 0x00);    //                  (hi byte)
-        out8(port + 3, 0x03);    // 8 bits, no parity, one stop bit
-        out8(port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
-        out8(port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
-        out8(port + 4, 0x0F);
+        unsafe {
+            out8(port + 1, 0x00); // Disable all interrupts
+            out8(port + 3, 0x80); // Enable DLAB (set baud rate divisor)
+            out8(port + 0, 0x03); // Set divisor to 3 (lo byte) 38400 baud
+            out8(port + 1, 0x00); //                  (hi byte)
+            out8(port + 3, 0x03); // 8 bits, no parity, one stop bit
+            out8(port + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
+            out8(port + 4, 0x0B); // IRQs enabled, RTS/DSR set
+            out8(port + 4, 0x0F);
+        }
 
         Self {
             port
@@ -23,13 +25,15 @@ impl SerialPort {
     }
 
     fn is_transmit_empty(&self) -> bool {
-        return in8(self.port + 5) & 0x20 != 0;
+        return unsafe { in8(self.port + 5) } & 0x20 != 0;
     }
 
     fn output_char(&mut self, c: char) {
         while !self.is_transmit_empty() {}
 
-        out8(self.port, c as u8);
+        unsafe {
+            out8(self.port, c as u8);
+        }
     }
 }
 

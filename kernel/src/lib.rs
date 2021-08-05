@@ -11,6 +11,7 @@ mod arch;
 mod util;
 mod mm;
 mod multiboot;
+#[macro_use] mod processor;
 mod process;
 
 // Pull in the `alloc` create
@@ -39,6 +40,16 @@ const PHYSICAL_MEMORY_OFFSET_END: usize = 0xffff890000000000;
 struct BootPhysicalMemory;
 
 impl PhysicalMemory for BootPhysicalMemory {
+
+    // Translates a physical address to a virtual address
+    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress> {
+        // TODO(patrik): Add some checks to that the physical address is
+        // inside the bounds of the boot physical memory range
+        let new_addr = paddr.0 + KERNEL_TEXT_START;
+
+        Some(VirtualAddress(new_addr))
+    }
+
     // Read from physical memory
     unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
         let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
@@ -89,6 +100,15 @@ impl PhysicalMemory for BootPhysicalMemory {
 struct KernelPhysicalMemory;
 
 impl PhysicalMemory for KernelPhysicalMemory {
+    // Translates a physical address to a virtual address
+    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress> {
+        // TODO(patrik): Add some checks to that the physical address is
+        // inside the bounds of the boot physical memory range
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
+
+        Some(VirtualAddress(new_addr))
+    }
+
     // Read from physical memory
     unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
         let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
@@ -313,7 +333,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     let kernel_end = physical_heap_end;
     frame_allocator.lock_region(kernel_start, kernel_end.0 - kernel_start.0);
 
-    let cr3 = arch::x86_64::get_cr3();
+    let cr3 = unsafe { arch::x86_64::read_cr3() };
     println!("CR3: {:#x}", cr3);
 
     let mut page_table =
@@ -351,9 +371,13 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
+    processor::init(&mut frame_allocator, &KERNEL_PHYSICAL_MEMORY, 0);
+
     use alloc::borrow::ToOwned;
     let process = Process::create_kernel_process("Test Process".to_owned(),
                                                  test_thread as u64);
+
+    println!("Core Address: {:?}", core!().core_id());
 
     /*
     let thread = Thread::create_kernel_thread("Test Thread".to_owned(),

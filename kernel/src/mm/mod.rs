@@ -39,6 +39,9 @@ impl core::fmt::Debug for PhysicalAddress {
 
 pub trait PhysicalMemory
 {
+    // Translates a physical address to a virtual address
+    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress>;
+
     // Read from physical memory
     unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T;
 

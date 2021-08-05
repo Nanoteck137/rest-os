@@ -95,7 +95,7 @@ unsafe extern fn interrupt_handler(number: u8,
     println!("Regs: {:#x?}", regs);
 
     if number == 14 {
-        let cr2 = super::get_cr2() as usize;
+        let cr2 = super::read_cr2() as usize;
         panic!("Page Fault at address: {:?}", VirtualAddress(cr2));
     }
 }

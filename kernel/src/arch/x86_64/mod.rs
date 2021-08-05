@@ -8,6 +8,10 @@ mod serial;
 mod gdt;
 mod interrupts;
 
+const MSR_FS_BASE:        u32 = 0xc0000100;
+const MSR_GS_BASE:        u32 = 0xc0000101;
+const MSR_KERNEL_GS_BASE: u32 = 0xc0000102;
+
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 pub struct Regs {
@@ -28,44 +32,81 @@ pub struct Regs {
     rax: u64,
 }
 
-pub fn out8(address: u16, data: u8) {
-    unsafe {
-        asm!("out dx, al", in("dx") address, in("al") data);
-    }
+pub unsafe fn out8(address: u16, data: u8) {
+    asm!("out dx, al", in("dx") address, in("al") data);
 }
 
-pub fn in8(address: u16) -> u8 {
+pub unsafe fn in8(address: u16) -> u8 {
     let value: u8;
-    unsafe {
-        asm!("in al, dx", out("al") value, in("dx") address);
-    }
+
+    asm!("in al, dx", out("al") value, in("dx") address);
+
     value
 }
 
-pub fn get_cr2() -> u64 {
+pub unsafe fn read_cr2() -> u64 {
     let value: u64;
 
-    unsafe {
-        asm!("mov rax, cr2", out("rax") value);
-    }
+    asm!("mov rax, cr2", out("rax") value);
 
     value
 }
 
-pub fn get_cr3() -> u64 {
+pub unsafe fn read_cr3() -> u64 {
     let value: u64;
 
-    unsafe {
-        asm!("mov rax, cr3", out("rax") value);
-    }
+    asm!("mov rax, cr3", out("rax") value);
 
     value
 }
 
-pub fn set_cr3(value: u64) {
-    unsafe {
-        asm!("mov cr3, rax", in("rax") value);
-    }
+pub unsafe fn write_cr3(value: u64) {
+    asm!("mov cr3, rax", in("rax") value);
+}
+
+pub unsafe fn rdmsr(msr: u32) -> u64 {
+    let value_low: u32;
+    let value_high: u32;
+
+    asm!("rdmsr",
+         out("edx") value_high,
+         out("eax") value_low,
+         in("ecx") msr);
+
+    (value_high as u64) << 32 | value_low as u64
+}
+
+pub unsafe fn wrmsr(msr: u32, value: u64) {
+    let value_low = (value & 0xffffffff) as u32;
+    let value_high = ((value >> 32) & 0xffffffff) as u32;
+    asm!("wrmsr",
+         in("edx") value_high,
+         in("eax") value_low,
+         in("ecx") msr);
+}
+
+pub unsafe fn read_fs_base() -> u64 {
+    rdmsr(MSR_FS_BASE)
+}
+
+pub unsafe fn write_fs_base(base: u64) {
+    wrmsr(MSR_FS_BASE, base)
+}
+
+pub unsafe fn read_gs_base() -> u64 {
+    rdmsr(MSR_GS_BASE)
+}
+
+pub unsafe fn write_gs_base(base: u64) {
+    wrmsr(MSR_GS_BASE, base)
+}
+
+pub unsafe fn read_kernel_gs_base() -> u64 {
+    rdmsr(MSR_KERNEL_GS_BASE)
+}
+
+pub unsafe fn write_kernel_gs_base(base: u64) {
+    wrmsr(MSR_KERNEL_GS_BASE, base)
 }
 
 pub fn initialize() {
