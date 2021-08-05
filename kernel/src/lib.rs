@@ -11,6 +11,7 @@ mod arch;
 mod util;
 mod mm;
 mod multiboot;
+mod process;
 
 // Pull in the `alloc` create
 #[macro_use] extern crate alloc;
@@ -22,6 +23,7 @@ use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::heap_alloc::Allocator;
 use mm::frame_alloc::BitmapFrameAllocator;
 use multiboot::{ Multiboot, Tag};
+use process::Thread;
 
 use arch::x86_64::page_table::{ PageTable, PageType };
 
@@ -253,6 +255,15 @@ fn initialize_heap() {
     }
 }
 
+fn test_thread() {
+    println!("Hello world from thread");
+
+    loop {
+    }
+}
+
+static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
+
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
     arch::initialize();
@@ -340,8 +351,12 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         }
     }
 
-    // Debug print that we are done executing
-    println!("Done");
+    use alloc::borrow::ToOwned;
+    // let process = Process::create_kernel_process();
+    let thread = Thread::create_kernel_thread("Test Thread".to_owned(), test_thread as u64, &THREAD_STACK);
+    unsafe {
+        thread.switch_to();
+    }
 
     loop {}
 }

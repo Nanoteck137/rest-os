@@ -5,6 +5,8 @@
 
 use crate::mm::VirtualAddress;
 
+use super::Regs;
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 struct IDTEntry {
@@ -79,26 +81,6 @@ pub struct InterruptFrame {
 	rflags: u64,
 	rsp:    u64,
 	ss:     u64,
-}
-
-#[derive(Copy, Clone, Debug)]
-#[repr(C, packed)]
-struct Regs {
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    r11: u64,
-    r10: u64,
-    r9:  u64,
-    r8:  u64,
-    rbp: u64,
-    rdi: u64,
-    rsi: u64,
-    rdx: u64,
-    rcx: u64,
-    rbx: u64,
-    rax: u64,
 }
 
 #[no_mangle]
