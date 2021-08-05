@@ -13,11 +13,13 @@ mod mm;
 mod multiboot;
 #[macro_use] mod processor;
 mod process;
+mod scheduler;
 
 // Pull in the `alloc` create
 #[macro_use] extern crate alloc;
 
 use core::panic::PanicInfo;
+use alloc::sync::Arc;
 
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
@@ -25,6 +27,7 @@ use mm::heap_alloc::Allocator;
 use mm::frame_alloc::BitmapFrameAllocator;
 use multiboot::{ Multiboot, Tag};
 use process::{ Thread, Process };
+use scheduler::Scheduler;
 
 use arch::x86_64::page_table::{ PageTable, PageType };
 
@@ -377,7 +380,12 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     let process = Process::create_kernel_process("Test Process".to_owned(),
                                                  test_thread as u64);
 
-    println!("Core Address: {:?}", core!().core_id());
+    Scheduler::add_process(Arc::new(process));
+    Scheduler::debug_dump_processes();
+
+    unsafe {
+        core!().scheduler().next();
+    }
 
     /*
     let thread = Thread::create_kernel_thread("Test Thread".to_owned(),

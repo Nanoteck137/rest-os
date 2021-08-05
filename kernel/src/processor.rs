@@ -3,6 +3,7 @@
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
 use crate::mm::frame_alloc::FrameAllocator;
 use crate::arch;
+use crate::scheduler::Scheduler;
 
 #[macro_export]
 macro_rules! core {
@@ -14,12 +15,19 @@ macro_rules! core {
 #[repr(C)]
 pub struct ProcessorInfo {
     address: VirtualAddress,
-    core_id: u32
+    core_id: u32,
+
+    // This cores own scheduler
+    scheduler: Scheduler
 }
 
 impl ProcessorInfo {
     pub fn core_id(&self) -> u32 {
         self.core_id
+    }
+
+    pub fn scheduler(&self) -> &Scheduler {
+        &self.scheduler
     }
 }
 
@@ -50,6 +58,8 @@ pub fn init<F, P>(frame_allocator: &mut F, physical_memory: &P, core_id: u32)
     let processor_info = ProcessorInfo {
         address: vaddr,
         core_id,
+
+        scheduler: Scheduler::new(),
     };
 
     unsafe {

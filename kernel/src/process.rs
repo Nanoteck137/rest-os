@@ -27,6 +27,14 @@ impl Process {
             threads
         }
     }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn thread(&self, i: usize) -> Option<&Thread> {
+        self.threads.get(i)
+    }
 }
 
 pub struct Thread {
