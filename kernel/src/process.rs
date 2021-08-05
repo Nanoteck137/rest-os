@@ -3,6 +3,31 @@
 use crate::arch::x86_64::Regs;
 
 use alloc::string::String;
+use alloc::vec::Vec;
+use alloc::borrow::ToOwned;
+
+static THREAD_STACK: [u8; 4096] = [0; 4096];
+
+pub struct Process {
+    name: String,
+
+    threads: Vec<Thread>,
+}
+
+impl Process {
+    pub fn create_kernel_process(name: String, entry: u64) -> Self {
+        let thread = Thread::create_kernel_thread("Process thread".to_owned(),
+                                                  entry, &THREAD_STACK);
+
+        let mut threads = Vec::new();
+        threads.push(thread);
+
+        Self {
+            name,
+            threads
+        }
+    }
+}
 
 pub struct Thread {
     name: String,

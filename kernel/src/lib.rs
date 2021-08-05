@@ -23,7 +23,7 @@ use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::heap_alloc::Allocator;
 use mm::frame_alloc::BitmapFrameAllocator;
 use multiboot::{ Multiboot, Tag};
-use process::Thread;
+use process::{ Thread, Process };
 
 use arch::x86_64::page_table::{ PageTable, PageType };
 
@@ -352,10 +352,16 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     }
 
     use alloc::borrow::ToOwned;
-    // let process = Process::create_kernel_process();
-    let thread = Thread::create_kernel_thread("Test Thread".to_owned(), test_thread as u64, &THREAD_STACK);
+    let process = Process::create_kernel_process("Test Process".to_owned(),
+                                                 test_thread as u64);
+
+    /*
+    let thread = Thread::create_kernel_thread("Test Thread".to_owned(),
+                                              test_thread as u64,
+                                              &THREAD_STACK);
+                                              */
     unsafe {
-        thread.switch_to();
+        // thread.switch_to();
     }
 
     loop {}
