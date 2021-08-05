@@ -387,15 +387,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         core!().scheduler().next();
     }
 
-    /*
-    let thread = Thread::create_kernel_thread("Test Thread".to_owned(),
-                                              test_thread as u64,
-                                              &THREAD_STACK);
-                                              */
-    unsafe {
-        // thread.switch_to();
-    }
-
     loop {}
 }
 
