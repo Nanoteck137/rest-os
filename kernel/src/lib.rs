@@ -19,6 +19,7 @@ mod scheduler;
 #[macro_use] extern crate alloc;
 
 use core::panic::PanicInfo;
+use core::alloc::Layout;
 use alloc::sync::Arc;
 
 use util::Locked;
@@ -283,6 +284,11 @@ fn test_thread() {
 
     loop {
     }
+}
+
+unsafe fn allocate_memory(size: usize) -> VirtualAddress {
+    ALLOCATOR.lock().alloc_memory(Layout::from_size_align(size, 8).unwrap())
+        .expect("Failed to allocate memory")
 }
 
 static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];

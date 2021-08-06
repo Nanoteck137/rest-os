@@ -6,15 +6,46 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::borrow::ToOwned;
 
+use core::sync::atomic::{ AtomicUsize, Ordering };
+
 static THREAD_STACK: [u8; 4096] = [0; 4096];
+
+static NEXT_PID: AtomicUsize = AtomicUsize::new(1);
+
+fn idle_thread() {
+    loop {}
+}
+
+fn next_pid() -> usize {
+    NEXT_PID.fetch_add(1, Ordering::SeqCst)
+}
 
 pub struct Process {
     name: String,
+    pid: usize,
+
+    kernel: bool,
 
     threads: Vec<Thread>,
 }
 
 impl Process {
+    pub fn create_idle_process() -> Self {
+        let stack_ptr = unsafe { crate::allocate_memory(128) };
+        let stack = unsafe { core::slice::from_raw_parts(stack_ptr.0 as *const u8, 128) };
+
+        let thread = Thread::create_kernel_thread("Idle Thread".to_owned(), idle_thread as u64, stack);
+        let mut threads = Vec::new();
+
+        Self {
+            name: "Idle Process".to_owned(),
+            pid: 0,
+
+            kernel: true,
+            threads,
+        }
+    }
+
     pub fn create_kernel_process(name: String, entry: u64) -> Self {
         let thread = Thread::create_kernel_thread("Process thread".to_owned(),
                                                   entry, &THREAD_STACK);
@@ -22,8 +53,14 @@ impl Process {
         let mut threads = Vec::new();
         threads.push(thread);
 
+        let pid = next_pid();
+
         Self {
             name,
+            pid,
+
+            kernel: true,
+
             threads
         }
     }
@@ -32,25 +69,39 @@ impl Process {
         &self.name
     }
 
+    pub fn pid(&self) -> usize {
+        self.pid
+    }
+
     pub fn thread(&self, i: usize) -> Option<&Thread> {
         self.threads.get(i)
     }
+
+    pub fn thread_mut(&mut self, i: usize) -> Option<&mut Thread> {
+        self.threads.get_mut(i)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ThreadState {
+    Ready,
+    Stopped,
+    Running,
+    Done,
 }
 
 pub struct Thread {
     name: String,
+    state: ThreadState,
     control_block: ThreadControlBlock,
 }
 
+#[derive(Copy, Clone)]
 #[repr(C, packed)]
-struct ThreadControlBlock {
+pub struct ThreadControlBlock {
     regs: Regs,
     rip: u64,
     rsp: u64,
-}
-
-extern "C" {
-    fn thread_switch(regs: &ThreadControlBlock);
 }
 
 impl Thread {
@@ -65,43 +116,20 @@ impl Thread {
 
         Self {
             name,
+            state: ThreadState::Ready,
             control_block,
         }
     }
 
-    pub unsafe fn switch_to(&self) {
-        thread_switch(&self.control_block);
+    pub fn state(&self) -> ThreadState {
+        self.state
+    }
+
+    pub fn set_state(&mut self, state: ThreadState) {
+        self.state = state;
+    }
+
+    pub fn control_block(&self) -> ThreadControlBlock {
+        self.control_block
     }
 }
-
-global_asm!(r#"
-.global thread_switch
-thread_switch:
-    mov rsp, QWORD PTR [rdi + 0x80]
-
-    mov r15, QWORD PTR [rdi + 0x00]
-    mov r14, QWORD PTR [rdi + 0x08]
-    mov r13, QWORD PTR [rdi + 0x10]
-    mov r12, QWORD PTR [rdi + 0x18]
-    mov r11, QWORD PTR [rdi + 0x20]
-    mov r10, QWORD PTR [rdi + 0x28]
-    mov r9,  QWORD PTR [rdi + 0x30]
-    mov r8,  QWORD PTR [rdi + 0x38]
-    mov rbp, QWORD PTR [rdi + 0x40]
-    // mov rdi, QWORD PTR [rdi + 0x48]
-    mov rsi, QWORD PTR [rdi + 0x50]
-    mov rdx, QWORD PTR [rdi + 0x58]
-    mov rcx, QWORD PTR [rdi + 0x60]
-    mov rbx, QWORD PTR [rdi + 0x68]
-    mov rax, QWORD PTR [rdi + 0x70]
-
-    // Push the rip
-    push QWORD PTR [rdi + 0x78]
-
-    // Now we can set push the value RDI needs
-    push QWORD PTR [rdi + 0x48]
-    // Pop the value to set RDI
-    pop rdi
-
-    ret
-"#);

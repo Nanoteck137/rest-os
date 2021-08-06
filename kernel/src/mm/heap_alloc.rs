@@ -141,7 +141,7 @@ impl Allocator {
     }
 
     /// Find and allocate memory from the allocator
-    unsafe fn alloc_memory(&mut self, layout: Layout)
+    pub unsafe fn alloc_memory(&mut self, layout: Layout)
         -> Option<VirtualAddress>
     {
         // We need to align the layout so it meets the requirements for
@@ -171,7 +171,7 @@ impl Allocator {
     }
 
     /// Free some memory
-    unsafe fn free_memory(&mut self, addr: VirtualAddress, size: usize) {
+    pub unsafe fn free_memory(&mut self, addr: VirtualAddress, size: usize) {
         // Add the regoin we got back to the free list
         self.add_free_region(addr, size);
     }
