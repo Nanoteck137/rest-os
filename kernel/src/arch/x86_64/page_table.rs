@@ -196,7 +196,9 @@ impl PageTable {
             if entries[index].is_none() {
                 let new_table = frame_allocator.alloc_frame()?;
                 let new_table = PhysicalAddress::from(new_table);
-                core::ptr::write_bytes(new_table.0 as *mut u8, 0, 4096);
+                let ptr = physical_memory.translate(new_table)
+                    .expect("Failed to translate addr");
+                core::ptr::write_bytes(ptr.0 as *mut u8, 0, 4096);
 
                 let addr = entries[index - 1].unwrap();
 

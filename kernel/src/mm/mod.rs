@@ -1,11 +1,33 @@
+use crate::arch;
+use crate::arch::x86_64::page_table::{ PageTable, PageType };
+
 use core::convert::TryFrom;
+
+use alloc::sync::{ Arc, Weak };
+use alloc::string::String;
+use alloc::collections::BTreeMap;
+
+use spin::Mutex;
+
+use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
 
 pub mod heap_alloc;
 pub mod frame_alloc;
 
 pub const PAGE_SIZE: usize = 4096;
 
-#[derive(Copy, Clone, PartialEq)]
+pub const PHYSICAL_MEMORY_START: VirtualAddress =
+    VirtualAddress(0xffff888000000000);
+pub const PHYSICAL_MEMORY_END: VirtualAddress =
+    VirtualAddress(0xffff988000000000);
+pub const PHYSICAL_MEMORY_SIZE: usize =
+    PHYSICAL_MEMORY_END.0 - PHYSICAL_MEMORY_START.0;
+
+pub const VMALLOC_START: VirtualAddress = VirtualAddress(0xffffa88000000000);
+pub const VMALLOC_END: VirtualAddress = VirtualAddress(0xffffb88000000000);
+pub const VMALLOC_SIZE: usize = VMALLOC_END.0 - VMALLOC_START.0;
+
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub struct VirtualAddress(pub usize);
 
 impl core::fmt::Debug for VirtualAddress {
@@ -74,4 +96,125 @@ impl TryFrom<PhysicalAddress> for Frame {
             index: addr.0 / 4096
         })
     }
+}
+
+#[derive(Debug)]
+pub struct VMRegion {
+    name: String,
+    addr: VirtualAddress,
+    page_count: usize,
+}
+
+impl VMRegion {
+    pub fn addr(&self) -> VirtualAddress {
+        self.addr
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.page_count
+    }
+}
+
+struct MemoryManager {
+    kernel_regions: BTreeMap<usize, Arc<VMRegion>>,
+
+    next_addr: VirtualAddress,
+
+    frame_allocator: BitmapFrameAllocator
+}
+
+impl MemoryManager {
+    fn new(frame_allocator: BitmapFrameAllocator) -> Self {
+        Self {
+            kernel_regions: BTreeMap::new(),
+            next_addr: VMALLOC_START,
+            frame_allocator,
+        }
+    }
+
+    fn allocate_kernel_vm(&mut self, name: String, size: usize)
+        -> Option<Weak<VMRegion>>
+    {
+        assert!(self.next_addr.0 % PAGE_SIZE == 0);
+
+        let addr = self.next_addr.0;
+        let pages = size / PAGE_SIZE + 1;
+
+        self.next_addr.0 += pages * PAGE_SIZE;
+
+        let region = Arc::new(VMRegion {
+            name,
+            addr: VirtualAddress(addr),
+            page_count: pages
+        });
+
+        let result = Arc::downgrade(&region);
+        self.kernel_regions.insert(addr, region);
+
+        Some(result)
+    }
+
+    fn find_region(&mut self, vaddr: VirtualAddress) -> Option<Arc<VMRegion>> {
+        for region in self.kernel_regions.values() {
+            let start = region.addr();
+            let end = region.addr() + (region.page_count() * PAGE_SIZE);
+
+            if start >= vaddr && vaddr < end {
+                return Some(region.clone());
+            }
+
+            println!("Start: {:?} End: {:?}", start, end);
+        }
+
+        None
+    }
+
+    fn page_fault(&mut self, vaddr: VirtualAddress) -> bool {
+        println!("Page fault: {:?}", vaddr);
+
+        let region = self.find_region(vaddr)
+            .expect("Failed to find region");
+
+        println!("Region: {:?}", region);
+        let cr3 = unsafe { arch::x86_64::read_cr3() };
+        println!("CR3: {:#x}", cr3);
+
+        let mut page_table =
+            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+
+        for page in 0..region.page_count() {
+            unsafe {
+                let frame = self.frame_allocator.alloc_frame()
+                    .expect("Failed to allocate frame");
+                println!("Target: {:?}", PhysicalAddress::from(frame));
+                page_table.map_raw(&mut self.frame_allocator,
+                                   &crate::KERNEL_PHYSICAL_MEMORY,
+                                   region.addr() + (page * PAGE_SIZE),
+                                   PhysicalAddress::from(frame),
+                                   PageType::Page4K)
+                    .expect("Failed to map");
+            }
+        }
+
+        true
+    }
+}
+
+static MM: Mutex<Option<MemoryManager>> = Mutex::new(None);
+
+pub fn initialize(frame_allocator: BitmapFrameAllocator) {
+    *MM.lock() = Some(MemoryManager::new(frame_allocator));
+}
+
+pub fn allocate_kernel_vm(name: String, size: usize) -> Option<Weak<VMRegion>> {
+    assert!(size > 0, "Size can't be 0");
+
+    // Allocate from the kernel vmalloc region
+    // Map in the region
+
+    MM.lock().as_mut().unwrap().allocate_kernel_vm(name, size)
+}
+
+pub fn page_fault(vaddr: VirtualAddress) -> bool {
+    MM.lock().as_mut().unwrap().page_fault(vaddr)
 }

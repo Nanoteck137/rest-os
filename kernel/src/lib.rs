@@ -101,7 +101,7 @@ impl PhysicalMemory for BootPhysicalMemory {
     }
 }
 
-struct KernelPhysicalMemory;
+pub struct KernelPhysicalMemory;
 
 impl PhysicalMemory for KernelPhysicalMemory {
     // Translates a physical address to a virtual address
@@ -246,7 +246,7 @@ fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
 }
 
 static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
-static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory = KernelPhysicalMemory {};
+pub static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory = KernelPhysicalMemory {};
 
 #[global_allocator]
 static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
@@ -382,12 +382,27 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     processor::init(&mut frame_allocator, &KERNEL_PHYSICAL_MEMORY, 0);
 
+    mm::initialize(frame_allocator);
+
     use alloc::borrow::ToOwned;
     let process = Process::create_kernel_process("Test Process".to_owned(),
                                                  test_thread as u64);
 
     Scheduler::add_process(Arc::new(process));
     Scheduler::debug_dump_processes();
+
+    use alloc::sync::Weak;
+    let region = mm::allocate_kernel_vm("Test Region".to_owned(), 5748);
+    let region = Weak::upgrade(&region.unwrap()).unwrap();
+    println!("Region: {:?}", region);
+
+    let ptr = region.addr().0 as *mut u8;
+    unsafe {
+        *ptr = 123;
+    }
+
+    let region = mm::allocate_kernel_vm("Test Region 2".to_owned(), 5748);
+    println!("Region: {:?}", region);
 
     unsafe {
         core!().scheduler().next();

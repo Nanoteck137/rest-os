@@ -3,6 +3,7 @@
 //! but we needed to modify the code because that assembly code used
 //! MSVC calling convention but we use the SysV ABI calling convention
 
+use crate::mm;
 use crate::mm::VirtualAddress;
 
 use super::Regs;
@@ -96,7 +97,10 @@ unsafe extern fn interrupt_handler(number: u8,
 
     if number == 14 {
         let cr2 = super::read_cr2() as usize;
-        panic!("Page Fault at address: {:?}", VirtualAddress(cr2));
+        if !mm::page_fault(VirtualAddress(cr2)) {
+            panic!("Unhandled Page Fault at address: {:?}",
+                   VirtualAddress(cr2));
+        }
     }
 }
 
