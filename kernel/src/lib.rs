@@ -30,7 +30,7 @@ use multiboot::{ Multiboot, Tag};
 use process::{ Thread, Process };
 use scheduler::Scheduler;
 
-use arch::x86_64::page_table::{ PageTable, PageType };
+use arch::x86_64::{ PageTable, PageType };
 
 // NOTE(patrik): Almost the same as the Linux kernel
 const KERNEL_TEXT_START: usize = 0xffffffff80000000;

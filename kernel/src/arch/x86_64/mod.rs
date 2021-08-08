@@ -2,8 +2,9 @@
 
 #![allow(dead_code)]
 
-pub mod page_table;
+pub use page_table::{ PageTable, PageType };
 
+mod page_table;
 mod serial;
 mod gdt;
 mod interrupts;

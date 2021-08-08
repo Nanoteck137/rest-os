@@ -1,5 +1,5 @@
 use crate::arch;
-use crate::arch::x86_64::page_table::{ PageTable, PageType };
+use crate::arch::x86_64::{ PageTable, PageType };
 
 use core::convert::TryFrom;
 
@@ -120,16 +120,34 @@ struct MemoryManager {
 
     next_addr: VirtualAddress,
 
-    frame_allocator: BitmapFrameAllocator
+    frame_allocator: BitmapFrameAllocator,
+
+    reference_page_table: PageTable,
 }
 
 impl MemoryManager {
-    fn new(frame_allocator: BitmapFrameAllocator) -> Self {
-        Self {
+    fn new(mut frame_allocator: BitmapFrameAllocator) -> Self {
+        let page_table = PageTable::create(&mut frame_allocator);
+
+        let mut result = Self {
             kernel_regions: BTreeMap::new(),
             next_addr: VMALLOC_START,
             frame_allocator,
-        }
+
+            reference_page_table: page_table,
+        };
+
+        result.initialize();
+
+        result
+    }
+
+    fn initialize(&mut self) {
+        // TODO(patrik): Initialize the reference page table
+        //   - The reference page table is used to create new page table
+        //     with the kernel mappings identical
+        // TODO(patrik): Map in the kernel text
+        // TODO(patrik): Map in physical memory
     }
 
     fn allocate_kernel_vm(&mut self, name: String, size: usize)
@@ -169,9 +187,15 @@ impl MemoryManager {
         None
     }
 
-    fn page_fault(&mut self, vaddr: VirtualAddress) -> bool {
-        println!("Page fault: {:?}", vaddr);
+    fn is_vmalloc_addr(vaddr: VirtualAddress) -> bool {
+        if vaddr >= VMALLOC_START && vaddr < VMALLOC_END {
+            true
+        } else {
+            false
+        }
+    }
 
+    fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
         let region = self.find_region(vaddr)
             .expect("Failed to find region");
 
@@ -187,6 +211,7 @@ impl MemoryManager {
                 let frame = self.frame_allocator.alloc_frame()
                     .expect("Failed to allocate frame");
                 println!("Target: {:?}", PhysicalAddress::from(frame));
+
                 page_table.map_raw(&mut self.frame_allocator,
                                    &crate::KERNEL_PHYSICAL_MEMORY,
                                    region.addr() + (page * PAGE_SIZE),
@@ -194,6 +219,16 @@ impl MemoryManager {
                                    PageType::Page4K)
                     .expect("Failed to map");
             }
+        }
+
+        true
+    }
+
+    fn page_fault(&mut self, vaddr: VirtualAddress) -> bool {
+        println!("Page fault: {:?}", vaddr);
+
+        if Self::is_vmalloc_addr(vaddr) {
+            return self.page_fault_vmalloc(vaddr);
         }
 
         true

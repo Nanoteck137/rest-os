@@ -94,11 +94,25 @@ pub struct PageMapping {
     p1: Option<PhysicalAddress>,
 }
 
+#[derive(Debug)]
 pub struct PageTable {
     table: PhysicalAddress
 }
 
 impl PageTable {
+    pub fn create<F>(frame_allocator: &mut F) -> Self
+        where F: FrameAllocator
+    {
+        let frame = frame_allocator.alloc_frame()
+            .expect("Failed to allocate frame for the new page table");
+
+        let paddr = PhysicalAddress::from(frame);
+
+        Self {
+            table: paddr
+        }
+    }
+
     pub unsafe fn from_table(table: PhysicalAddress) -> Self {
         Self {
             table: PhysicalAddress(table.0 & !0xfff)
