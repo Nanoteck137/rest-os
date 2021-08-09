@@ -5,13 +5,16 @@
 #![feature(asm, global_asm)]
 #![no_std]
 
+// TODO(patrik): Temporary
+#![allow(dead_code, unused_imports)]
+
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
+#[macro_use] mod processor;
 mod arch;
 mod util;
-mod mm;
 mod multiboot;
-#[macro_use] mod processor;
+mod mm;
 mod process;
 mod scheduler;
 
@@ -24,146 +27,13 @@ use alloc::sync::Arc;
 
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
-use mm::heap_alloc::Allocator;
-use mm::frame_alloc::BitmapFrameAllocator;
+use mm::{ Allocator, BitmapFrameAllocator };
+use mm::{ BOOT_PHYSICAL_MEMORY, KERNEL_PHYSICAL_MEMORY };
 use multiboot::{ Multiboot, Tag};
 use process::{ Thread, Process };
 use scheduler::Scheduler;
 
 use arch::x86_64::{ PageTable, PageType };
-
-// NOTE(patrik): Almost the same as the Linux kernel
-const KERNEL_TEXT_START: usize = 0xffffffff80000000;
-const KERNEL_TEXT_SIZE:  usize = 1 * 1024 * 1024 * 1024;
-const KERNEL_TEXT_END:   usize = KERNEL_TEXT_START + KERNEL_TEXT_SIZE - 1;
-
-// NOTE(patrik): Same as the Linux kernel
-const PHYSICAL_MEMORY_OFFSET:     usize = 0xffff888000000000;
-const PHYSICAL_MEMORY_OFFSET_END: usize = 0xffff890000000000;
-
-struct BootPhysicalMemory;
-
-impl PhysicalMemory for BootPhysicalMemory {
-
-    // Translates a physical address to a virtual address
-    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress> {
-        // TODO(patrik): Add some checks to that the physical address is
-        // inside the bounds of the boot physical memory range
-        let new_addr = paddr.0 + KERNEL_TEXT_START;
-
-        Some(VirtualAddress(new_addr))
-    }
-
-    // Read from physical memory
-    unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
-        let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
-        assert!(end <= KERNEL_TEXT_END,
-                "Reading address '{:?}' is over the kernel text area", paddr);
-
-        let new_addr = paddr.0 + KERNEL_TEXT_START;
-        core::ptr::read_volatile(new_addr as *const T)
-    }
-
-    // Write to physical memory
-    unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T) {
-        let end = (paddr.0 + core::mem::size_of::<T>() - 1) + KERNEL_TEXT_START;
-        assert!(end <= KERNEL_TEXT_END,
-                "Writing address '{:?}' is over the kernel text area", paddr);
-
-        let new_addr = paddr.0 + KERNEL_TEXT_START;
-        core::ptr::write_volatile(new_addr as *mut T, value)
-    }
-
-    // Read a slice from physical memory
-    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a [T]
-    {
-        let byte_length = size * core::mem::size_of::<T>();
-        let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
-        assert!(end <= KERNEL_TEXT_END,
-                "Slicing address '{:?}' is over the kernel text area", paddr);
-
-        let new_addr = paddr.0 + KERNEL_TEXT_START;
-        core::slice::from_raw_parts(new_addr as *const T, size)
-    }
-
-    // Mutable Slice from physical memory
-    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a mut [T]
-    {
-        let byte_length = size * core::mem::size_of::<T>();
-        let end = (paddr.0 + byte_length - 1) + KERNEL_TEXT_START;
-        assert!(end <= KERNEL_TEXT_END,
-                "Slicing address '{:?}' is over the kernel text area", paddr);
-
-        let new_addr = paddr.0 + KERNEL_TEXT_START;
-        core::slice::from_raw_parts_mut(new_addr as *mut T, size)
-    }
-}
-
-pub struct KernelPhysicalMemory;
-
-impl PhysicalMemory for KernelPhysicalMemory {
-    // Translates a physical address to a virtual address
-    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress> {
-        // TODO(patrik): Add some checks to that the physical address is
-        // inside the bounds of the boot physical memory range
-        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
-
-        Some(VirtualAddress(new_addr))
-    }
-
-    // Read from physical memory
-    unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T {
-        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
-            PHYSICAL_MEMORY_OFFSET;
-        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
-                "Reading address '{:?}' is over the physical memory area",
-                paddr);
-
-        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
-        core::ptr::read_volatile(new_addr as *const T)
-    }
-
-    // Write to physical memory
-    unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T) {
-        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
-            PHYSICAL_MEMORY_OFFSET;
-        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
-                "Writing address '{:?}' is over the physical memory area",
-                paddr);
-
-        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
-        core::ptr::write_volatile(new_addr as *mut T, value)
-    }
-
-    // Read a slice from physical memory
-    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a [T]
-    {
-        let byte_length = size * core::mem::size_of::<T>();
-        let end = (paddr.0 + byte_length - 1) + PHYSICAL_MEMORY_OFFSET;
-        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
-                "Slicing address '{:?}' is over the physical memory area",
-                paddr);
-
-        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
-        core::slice::from_raw_parts(new_addr as *const T, size)
-    }
-
-    // Mutable Slice from physical memory
-    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a mut [T]
-    {
-        let byte_length = size * core::mem::size_of::<T>();
-        let end = (paddr.0 + byte_length - 1) + PHYSICAL_MEMORY_OFFSET;
-        assert!(end < PHYSICAL_MEMORY_OFFSET_END,
-                "Slicing address '{:?}' is over the physical memory area",
-                paddr);
-        let new_addr = paddr.0 + PHYSICAL_MEMORY_OFFSET;
-        core::slice::from_raw_parts_mut(new_addr as *mut T, size)
-    }
-}
 
 fn display_memory_map(multiboot: &Multiboot) {
     let memory_map = multiboot.find_memory_map()
@@ -245,9 +115,6 @@ fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     panic!("memory allocation of {} bytes failed", layout.size())
 }
 
-static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
-pub static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory = KernelPhysicalMemory {};
-
 #[global_allocator]
 static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
 
@@ -324,65 +191,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         println!("Kernel Command Line: {}", s);
     }
 
-    let (heap_start, heap_size) = heap();
-    let heap_end = heap_start + heap_size;
-    let physical_heap_end = PhysicalAddress(heap_end.0 - KERNEL_TEXT_START);
-
-    let mut frame_allocator =
-        BitmapFrameAllocator::new();
-    unsafe {
-        frame_allocator.init(multiboot.find_memory_map()
-            .expect("Failed to find memory map"));
-    }
-
-    frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
-
-    // TODO(patrik): Change this
-    let kernel_start = PhysicalAddress(0x100000);
-    let kernel_end = physical_heap_end;
-    frame_allocator.lock_region(kernel_start, kernel_end.0 - kernel_start.0);
-
-    let cr3 = unsafe { arch::x86_64::read_cr3() };
-    println!("CR3: {:#x}", cr3);
-
-    let mut page_table =
-        unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
-
-    unsafe {
-        // Search for the highest address inside the memory map so we can
-        // map all of the physical memory
-        let highest_address = {
-            let memory_map = multiboot.find_memory_map()
-                .expect("Failed to find memory map");
-            let mut address = 0;
-            for entry in memory_map.iter() {
-                let end = entry.addr() + entry.length();
-                address = core::cmp::max(address, end);
-            }
-
-            address as usize
-        };
-
-        // Map all of Physical memory at PHYSICAL_MEMORY_OFFSET
-        for offset in (0..=highest_address).step_by(2 * 1024 * 1024) {
-            let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_OFFSET);
-            let paddr = PhysicalAddress(offset);
-            page_table.map_raw(&mut frame_allocator, &BOOT_PHYSICAL_MEMORY,
-                               vaddr, paddr, PageType::Page2M)
-                .expect("Failed to map");
-        }
-
-        // Unmap the mappings from 0-1GiB those mappings are from the boot and
-        // we need to unmap those
-        for offset in (0..1 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
-            page_table.unmap_raw(&mut frame_allocator, &KERNEL_PHYSICAL_MEMORY,
-                                 VirtualAddress(offset));
-        }
-    }
-
-    processor::init(&mut frame_allocator, &KERNEL_PHYSICAL_MEMORY, 0);
-
-    mm::initialize(frame_allocator);
+    mm::initialize(PhysicalAddress(multiboot_addr));
+    processor::init(0);
 
     use alloc::borrow::ToOwned;
     let process = Process::create_kernel_process("Test Process".to_owned(),
@@ -392,11 +202,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     Scheduler::debug_dump_processes();
 
     use alloc::sync::Weak;
-    let region = mm::allocate_kernel_vm("Test Region".to_owned(), 5748);
-    let region = Weak::upgrade(&region.unwrap()).unwrap();
-    println!("Region: {:?}", region);
+    let addr = mm::allocate_kernel_vm("Test Region".to_owned(), 5748);
 
-    let ptr = region.addr().0 as *mut u8;
+    let ptr = addr.unwrap().0 as *mut u8;
     unsafe {
         *ptr = 123;
     }

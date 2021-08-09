@@ -7,8 +7,7 @@
 #![allow(dead_code)]
 
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory, Frame };
-use crate::mm::PAGE_SIZE;
-use crate::mm::frame_alloc::FrameAllocator;
+use crate::mm::{ FrameAllocator, PAGE_SIZE };
 
 use core::convert::TryFrom;
 
@@ -358,7 +357,27 @@ impl PageTable {
         Some(())
     }
 
-    fn index(addr: VirtualAddress) -> (usize, usize, usize, usize, usize) {
+    pub unsafe fn set_top_level_entry<P>(&self, physical_memory: &P,
+                                         index: usize, entry: Entry)
+        where P: PhysicalMemory
+    {
+        let addr = self.table.0 + index * core::mem::size_of::<Entry>();
+        let addr = PhysicalAddress(addr);
+        physical_memory.write::<Entry>(addr, entry);
+    }
+
+    pub unsafe fn top_level_entry<P>(&self, physical_memory: &P, index: usize)
+        -> Entry
+        where P: PhysicalMemory
+    {
+        let addr = self.table.0 + index * core::mem::size_of::<Entry>();
+        let addr = PhysicalAddress(addr);
+        let entry = physical_memory.read::<Entry>(addr);
+
+        entry
+    }
+
+    pub fn index(addr: VirtualAddress) -> (usize, usize, usize, usize, usize) {
         let offset = addr.0 & 0xfff;
         let p1 = (addr.0 >> 12) & 0x1ff;
         let p2 = (addr.0 >> 21) & 0x1ff;
@@ -366,5 +385,9 @@ impl PageTable {
         let p4 = (addr.0 >> 39) & 0x1ff;
 
         (p4, p3, p2, p1, offset)
+    }
+
+    pub fn addr(&self) -> PhysicalAddress {
+        self.table
     }
 }

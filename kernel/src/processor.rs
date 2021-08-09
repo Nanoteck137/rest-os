@@ -1,9 +1,13 @@
 //! Module to interface with processor
 
+use crate::mm;
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
-use crate::mm::frame_alloc::FrameAllocator;
+use crate::mm::FrameAllocator;
 use crate::arch;
+use crate::arch::x86_64::PageTable;
 use crate::scheduler::Scheduler;
+
+use alloc::string::String;
 
 #[macro_export]
 macro_rules! core {
@@ -29,6 +33,15 @@ impl ProcessorInfo {
     pub fn scheduler(&self) -> &Scheduler {
         &self.scheduler
     }
+
+    pub fn page_table(&self) -> PageTable {
+        let cr3 = unsafe { arch::x86_64::read_cr3() };
+
+        let page_table =
+            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+
+        page_table
+    }
 }
 
 pub fn get_local_info() -> &'static ProcessorInfo {
@@ -42,21 +55,17 @@ pub fn get_local_info() -> &'static ProcessorInfo {
     unsafe { &*(ptr as *const ProcessorInfo) }
 }
 
-pub fn init<F, P>(frame_allocator: &mut F, physical_memory: &P, core_id: u32)
-    where F: FrameAllocator,
-          P: PhysicalMemory
+pub fn init(core_id: u32)
 {
-    // We allocate a frame so we can store all the infomation a processor core
-    // needs to have
-    let frame = frame_allocator.alloc_frame()
-        .expect("Failed to allocate frame for the ProcessorInfo");
-    let addr = PhysicalAddress::from(frame);
-    let vaddr = physical_memory.translate(addr)
-        .expect("No translation for the address");
+    let addr = mm::allocate_kernel_vm(format!("Processor Info: {}", core_id),
+                                      core::mem::size_of::<ProcessorInfo>())
+        .expect("Failed to allocate memory for Processor Info");
+
+    println!("Returned addr: {:?}", addr);
 
     // Create the structure for the core infomation
     let processor_info = ProcessorInfo {
-        address: vaddr,
+        address: addr,
         core_id,
 
         scheduler: Scheduler::new(),
@@ -64,10 +73,13 @@ pub fn init<F, P>(frame_allocator: &mut F, physical_memory: &P, core_id: u32)
 
     unsafe {
         // Write that infomation to the frame we allocated
-        core::ptr::write(vaddr.0 as *mut ProcessorInfo, processor_info);
+        core::ptr::write(addr.0 as *mut ProcessorInfo, processor_info);
         // Set the kernel gs base to that we can access that infomation
-        arch::x86_64::write_kernel_gs_base(vaddr.0 as u64);
+        arch::x86_64::write_kernel_gs_base(addr.0 as u64);
         // We need to swapgs to have the kernel gs as the current gs
         asm!("swapgs");
+
+        let d = arch::x86_64::read_kernel_gs_base();
+        println!("D: {:#x}", d);
     }
 }

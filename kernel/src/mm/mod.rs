@@ -1,6 +1,8 @@
 use crate::arch;
 use crate::arch::x86_64::{ PageTable, PageType };
 
+use crate::multiboot::Multiboot;
+
 use core::convert::TryFrom;
 
 use alloc::sync::{ Arc, Weak };
@@ -9,12 +11,23 @@ use alloc::collections::BTreeMap;
 
 use spin::Mutex;
 
-use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
+pub use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
+pub use heap_alloc::Allocator;
 
-pub mod heap_alloc;
-pub mod frame_alloc;
+pub use physical_memory::{ PhysicalMemory };
+use physical_memory::{ BootPhysicalMemory, KernelPhysicalMemory };
+
+mod heap_alloc;
+mod frame_alloc;
+mod physical_memory;
 
 pub const PAGE_SIZE: usize = 4096;
+
+pub const KERNEL_TEXT_START: VirtualAddress =
+    VirtualAddress(0xffffffff80000000);
+pub const KERNEL_TEXT_END: VirtualAddress =
+    VirtualAddress(0xffffffffc0000000);
+pub const KERNEL_TEXT_SIZE: usize = KERNEL_TEXT_END.0 - KERNEL_TEXT_START.0;
 
 pub const PHYSICAL_MEMORY_START: VirtualAddress =
     VirtualAddress(0xffff888000000000);
@@ -26,6 +39,10 @@ pub const PHYSICAL_MEMORY_SIZE: usize =
 pub const VMALLOC_START: VirtualAddress = VirtualAddress(0xffffa88000000000);
 pub const VMALLOC_END: VirtualAddress = VirtualAddress(0xffffb88000000000);
 pub const VMALLOC_SIZE: usize = VMALLOC_END.0 - VMALLOC_START.0;
+
+pub static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
+pub static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory =
+    KernelPhysicalMemory {};
 
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub struct VirtualAddress(pub usize);
@@ -59,26 +76,6 @@ impl core::fmt::Debug for PhysicalAddress {
     }
 }
 
-pub trait PhysicalMemory
-{
-    // Translates a physical address to a virtual address
-    fn translate(&self, paddr: PhysicalAddress) -> Option<VirtualAddress>;
-
-    // Read from physical memory
-    unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T;
-
-    // Write to physical memory
-    unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T);
-
-    // Slice from physical memory
-    unsafe fn slice<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a [T];
-
-    // Mutable Slice from physical memory
-    unsafe fn slice_mut<'a, T>(&self, paddr: PhysicalAddress, size: usize)
-        -> &'a mut [T];
-}
-
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Frame {
     index: usize
@@ -103,6 +100,8 @@ pub struct VMRegion {
     name: String,
     addr: VirtualAddress,
     page_count: usize,
+
+    is_mapped: bool,
 }
 
 impl VMRegion {
@@ -116,6 +115,7 @@ impl VMRegion {
 }
 
 struct MemoryManager {
+    multiboot_structure: PhysicalAddress,
     kernel_regions: BTreeMap<usize, Arc<VMRegion>>,
 
     next_addr: VirtualAddress,
@@ -126,10 +126,40 @@ struct MemoryManager {
 }
 
 impl MemoryManager {
-    fn new(mut frame_allocator: BitmapFrameAllocator) -> Self {
+    fn create_frame_allocator(multiboot: &Multiboot) -> BitmapFrameAllocator {
+        let mut frame_allocator = BitmapFrameAllocator::new();
+
+        let (heap_start, heap_size) = crate::heap();
+        let heap_end = heap_start + heap_size;
+        let physical_heap_end =
+            PhysicalAddress(heap_end.0 - KERNEL_TEXT_START.0);
+
+        unsafe {
+            frame_allocator.init(multiboot.find_memory_map()
+                .expect("Failed to find memory map"));
+        }
+
+        frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
+
+        // TODO(patrik): Change this
+        let kernel_start = PhysicalAddress(0x100000);
+        let kernel_end = physical_heap_end;
+        frame_allocator.lock_region(kernel_start,
+                                    kernel_end.0 - kernel_start.0);
+
+        frame_allocator
+    }
+
+    fn new(multiboot_structure: PhysicalAddress) -> Self {
+        let multiboot = unsafe {
+            Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY, multiboot_structure)
+        };
+
+        let mut frame_allocator = Self::create_frame_allocator(&multiboot);
         let page_table = PageTable::create(&mut frame_allocator);
 
         let mut result = Self {
+            multiboot_structure,
             kernel_regions: BTreeMap::new(),
             next_addr: VMALLOC_START,
             frame_allocator,
@@ -148,11 +178,87 @@ impl MemoryManager {
         //     with the kernel mappings identical
         // TODO(patrik): Map in the kernel text
         // TODO(patrik): Map in physical memory
+
+        let multiboot = unsafe {
+            Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
+                                 self.multiboot_structure)
+        };
+
+        let page_table = &mut self.reference_page_table;
+
+        unsafe {
+            // Search for the highest address inside the memory map so we can
+            // map all of the physical memory
+            let highest_address = {
+                let memory_map = multiboot.find_memory_map()
+                    .expect("Failed to find memory map");
+                let mut address = 0;
+                for entry in memory_map.iter() {
+                    let end = entry.addr() + entry.length();
+                    address = core::cmp::max(address, end);
+                }
+
+                address as usize
+            };
+
+            for addr in (KERNEL_TEXT_START.0..KERNEL_TEXT_END.0)
+                .step_by(2 * 1024 * 1024)
+            {
+                let vaddr = VirtualAddress(addr);
+                let paddr = PhysicalAddress(addr - KERNEL_TEXT_START.0);
+                page_table.map_raw(&mut self.frame_allocator,
+                                   &BOOT_PHYSICAL_MEMORY,
+                                   vaddr, paddr, PageType::Page2M)
+                    .expect("Failed to map");
+            }
+
+            // Map all of Physical memory at PHYSICAL_MEMORY_OFFSET
+            for offset in (0..=highest_address).step_by(2 * 1024 * 1024) {
+                let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_START.0);
+                let paddr = PhysicalAddress(offset);
+                page_table.map_raw(&mut self.frame_allocator,
+                                   &BOOT_PHYSICAL_MEMORY,
+                                   vaddr, paddr, PageType::Page2M)
+                    .expect("Failed to map");
+            }
+
+            /*
+            // Unmap the mappings from 0-1GiB those mappings are from the boot and
+            // we need to unmap those
+            for offset in (0..1 * 1024 * 1024 * 1024).step_by(2 * 1024 * 1024) {
+                page_table.unmap_raw(&mut self.frame_allocator,
+                                     &KERNEL_PHYSICAL_MEMORY,
+                                     VirtualAddress(offset));
+            }
+            */
+        }
+
+        unsafe {
+            arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
+        }
+    }
+
+    /// Creates a page table from the reference page table
+    fn create_page_table(&mut self) -> PageTable {
+        let page_table = PageTable::create(&mut self.frame_allocator);
+
+        for i in 0..512 {
+            unsafe {
+                let entry = self.reference_page_table
+                    .top_level_entry(&KERNEL_PHYSICAL_MEMORY, i);
+
+                page_table.set_top_level_entry(&KERNEL_PHYSICAL_MEMORY,
+                                               i, entry);
+            }
+        }
+
+        page_table
     }
 
     fn allocate_kernel_vm(&mut self, name: String, size: usize)
-        -> Option<Weak<VMRegion>>
+        -> Option<VirtualAddress>
     {
+        assert!(size > 0, "Size can't be 0");
         assert!(self.next_addr.0 % PAGE_SIZE == 0);
 
         let addr = self.next_addr.0;
@@ -163,10 +269,12 @@ impl MemoryManager {
         let region = Arc::new(VMRegion {
             name,
             addr: VirtualAddress(addr),
-            page_count: pages
+            page_count: pages,
+
+            is_mapped: false,
         });
 
-        let result = Arc::downgrade(&region);
+        let result = region.addr();
         self.kernel_regions.insert(addr, region);
 
         Some(result)
@@ -188,23 +296,11 @@ impl MemoryManager {
     }
 
     fn is_vmalloc_addr(vaddr: VirtualAddress) -> bool {
-        if vaddr >= VMALLOC_START && vaddr < VMALLOC_END {
-            true
-        } else {
-            false
-        }
+        vaddr >= VMALLOC_START && vaddr < VMALLOC_END
     }
 
-    fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
-        let region = self.find_region(vaddr)
-            .expect("Failed to find region");
-
-        println!("Region: {:?}", region);
-        let cr3 = unsafe { arch::x86_64::read_cr3() };
-        println!("CR3: {:#x}", cr3);
-
-        let mut page_table =
-            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+    fn map_region(&mut self, region: &VMRegion) {
+        let page_table = &mut self.reference_page_table;
 
         for page in 0..region.page_count() {
             unsafe {
@@ -221,12 +317,54 @@ impl MemoryManager {
             }
         }
 
+    }
+
+    fn get_current_page_table() -> PageTable {
+        let cr3 = unsafe { arch::x86_64::read_cr3() };
+
+        let page_table =
+            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+
+        page_table
+    }
+
+    fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
+        let region = self.find_region(vaddr)
+            .expect("Failed to find region");
+        println!("Region: {:#?}", region);
+
+        if !region.is_mapped {
+            self.map_region(&region);
+        }
+
+        let page_table = Self::get_current_page_table();
+
+        let (start_p4, _, _, _, _) = PageTable::index(VMALLOC_START);
+        let (end_p4, _, _, _, _) = PageTable::index(VMALLOC_END);
+
+        for i in start_p4..end_p4 {
+            println!("Index: {}", i);
+
+            unsafe {
+                let entry = self.reference_page_table.top_level_entry(
+                    &crate::KERNEL_PHYSICAL_MEMORY, i);
+                page_table.set_top_level_entry(&crate::KERNEL_PHYSICAL_MEMORY,
+                                               i, entry);
+            }
+        }
+
+        // NOTE(patrik): Now that the region is mapped inside the reference
+        // page table we need to map it inside the current page table
+
         true
     }
 
     fn page_fault(&mut self, vaddr: VirtualAddress) -> bool {
         println!("Page fault: {:?}", vaddr);
 
+        // NOTE(patrik): If the fault is for a vmalloc then we need to map
+        // those pages in the current page table maybe even inside the
+        // reference page table
         if Self::is_vmalloc_addr(vaddr) {
             return self.page_fault_vmalloc(vaddr);
         }
@@ -237,16 +375,12 @@ impl MemoryManager {
 
 static MM: Mutex<Option<MemoryManager>> = Mutex::new(None);
 
-pub fn initialize(frame_allocator: BitmapFrameAllocator) {
-    *MM.lock() = Some(MemoryManager::new(frame_allocator));
+pub fn initialize(multiboot_structure: PhysicalAddress) {
+    *MM.lock() = Some(MemoryManager::new(multiboot_structure));
 }
 
-pub fn allocate_kernel_vm(name: String, size: usize) -> Option<Weak<VMRegion>> {
-    assert!(size > 0, "Size can't be 0");
-
-    // Allocate from the kernel vmalloc region
-    // Map in the region
-
+pub fn allocate_kernel_vm(name: String, size: usize) -> Option<VirtualAddress>
+{
     MM.lock().as_mut().unwrap().allocate_kernel_vm(name, size)
 }
 
