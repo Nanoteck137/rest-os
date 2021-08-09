@@ -299,7 +299,9 @@ impl MemoryManager {
         vaddr >= VMALLOC_START && vaddr < VMALLOC_END
     }
 
-    fn map_region(&mut self, region: &VMRegion) {
+    fn map_region(&mut self, region: &mut VMRegion) {
+        assert!(!region.is_mapped, "Region already mapped");
+
         let page_table = &mut self.reference_page_table;
 
         for page in 0..region.page_count() {
@@ -317,6 +319,7 @@ impl MemoryManager {
             }
         }
 
+        region.is_mapped = false;
     }
 
     fn get_current_page_table() -> PageTable {
@@ -329,12 +332,13 @@ impl MemoryManager {
     }
 
     fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
-        let region = self.find_region(vaddr)
+        let mut region = self.find_region(vaddr)
             .expect("Failed to find region");
+        let region = unsafe { Arc::get_mut_unchecked(&mut region) };
         println!("Region: {:#?}", region);
 
         if !region.is_mapped {
-            self.map_region(&region);
+            self.map_region(region);
         }
 
         let page_table = Self::get_current_page_table();
@@ -352,9 +356,6 @@ impl MemoryManager {
                                                i, entry);
             }
         }
-
-        // NOTE(patrik): Now that the region is mapped inside the reference
-        // page table we need to map it inside the current page table
 
         true
     }

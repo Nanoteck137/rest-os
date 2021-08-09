@@ -2,7 +2,7 @@
 //! this is where the boot code is gonna call into.
 
 #![feature(panic_info_message, const_mut_refs, alloc_error_handler)]
-#![feature(asm, global_asm)]
+#![feature(asm, global_asm, get_mut_unchecked)]
 #![no_std]
 
 // TODO(patrik): Temporary
