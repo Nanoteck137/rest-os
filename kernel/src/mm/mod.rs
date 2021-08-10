@@ -233,6 +233,8 @@ impl MemoryManager {
             */
         }
 
+        // TODO(patrik): Free the old page table
+
         unsafe {
             arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
         }
@@ -308,7 +310,6 @@ impl MemoryManager {
             unsafe {
                 let frame = self.frame_allocator.alloc_frame()
                     .expect("Failed to allocate frame");
-                println!("Target: {:?}", PhysicalAddress::from(frame));
 
                 page_table.map_raw(&mut self.frame_allocator,
                                    &crate::KERNEL_PHYSICAL_MEMORY,
@@ -347,12 +348,10 @@ impl MemoryManager {
         let (end_p4, _, _, _, _) = PageTable::index(VMALLOC_END);
 
         for i in start_p4..end_p4 {
-            println!("Index: {}", i);
-
             unsafe {
                 let entry = self.reference_page_table.top_level_entry(
-                    &crate::KERNEL_PHYSICAL_MEMORY, i);
-                page_table.set_top_level_entry(&crate::KERNEL_PHYSICAL_MEMORY,
+                    &KERNEL_PHYSICAL_MEMORY, i);
+                page_table.set_top_level_entry(&KERNEL_PHYSICAL_MEMORY,
                                                i, entry);
             }
         }

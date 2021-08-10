@@ -201,7 +201,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     Scheduler::add_process(Arc::new(process));
     Scheduler::debug_dump_processes();
 
-    use alloc::sync::Weak;
     let addr = mm::allocate_kernel_vm("Test Region".to_owned(), 5748);
 
     let ptr = addr.unwrap().0 as *mut u8;
@@ -209,8 +208,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         *ptr = 123;
     }
 
-    let region = mm::allocate_kernel_vm("Test Region 2".to_owned(), 5748);
-    println!("Region: {:?}", region);
+    let addr = mm::allocate_kernel_vm("Test Region 2".to_owned(), 5748);
+    println!("Region: {:?}", addr);
 
     unsafe {
         core!().scheduler().next();

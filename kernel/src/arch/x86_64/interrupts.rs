@@ -90,17 +90,32 @@ unsafe extern fn interrupt_handler(number: u8,
                                    error: u64,
                                    regs: &mut Regs)
 {
-    println!("Number: {}", number);
-    println!("Frame: {:#x?}", frame);
-    println!("Error: {:#x?}", error);
-    println!("Regs: {:#x?}", regs);
+    if number < 32 {
+        match number {
+            14 => {
+                // Page Fault
+                let cr2 = super::read_cr2() as usize;
+                if !mm::page_fault(VirtualAddress(cr2)) {
+                    println!("Frame: {:#x?}", frame);
+                    println!("Error: {:#x?}", error);
+                    println!("Regs: {:#x?}", regs);
+                    panic!("Unhandled Page Fault at address: {:?}",
+                           VirtualAddress(cr2));
+                }
+            }
 
-    if number == 14 {
-        let cr2 = super::read_cr2() as usize;
-        if !mm::page_fault(VirtualAddress(cr2)) {
-            panic!("Unhandled Page Fault at address: {:?}",
-                   VirtualAddress(cr2));
+            _ => {
+                println!("CPU Exception: {}", number);
+                println!("Frame: {:#x?}", frame);
+                println!("Error: {:#x?}", error);
+                println!("Regs: {:#x?}", regs);
+            }
         }
+    } else {
+        println!("CPU Interrupts: {}", number);
+        println!("Frame: {:#x?}", frame);
+        println!("Error: {:#x?}", error);
+        println!("Regs: {:#x?}", regs);
     }
 }
 
