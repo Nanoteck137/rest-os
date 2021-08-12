@@ -25,6 +25,8 @@ use core::panic::PanicInfo;
 use core::alloc::Layout;
 use alloc::sync::Arc;
 
+use spin::RwLock;
+
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::{ Allocator, BitmapFrameAllocator };
@@ -146,13 +148,6 @@ fn initialize_heap() {
     }
 }
 
-fn test_thread() {
-    println!("Hello world from thread");
-
-    loop {
-    }
-}
-
 unsafe fn allocate_memory(size: usize) -> VirtualAddress {
     ALLOCATOR.lock().alloc_memory(Layout::from_size_align(size, 8).unwrap())
         .expect("Failed to allocate memory")
@@ -195,25 +190,22 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     processor::init(0);
 
     use alloc::borrow::ToOwned;
-    let process = Process::create_kernel_process("Test Process".to_owned(),
-                                                 test_thread as u64);
+    let process = Process::create_kernel_process("Kernel Init".to_owned(),
+                                                 kernel_init_thread);
 
-    Scheduler::add_process(Arc::new(process));
+    Scheduler::add_process(process);
     Scheduler::debug_dump_processes();
-
-    let addr = mm::allocate_kernel_vm("Test Region".to_owned(), 5748);
-
-    let ptr = addr.unwrap().0 as *mut u8;
-    unsafe {
-        *ptr = 123;
-    }
-
-    let addr = mm::allocate_kernel_vm("Test Region 2".to_owned(), 5748);
-    println!("Region: {:?}", addr);
 
     unsafe {
         core!().scheduler().next();
     }
+
+    panic!("Should not be here!!!");
+}
+
+fn kernel_init_thread() {
+    println!("kernel_init_thread: Hello World");
+    println!("Current Process: {:#x?}", core!().process());
 
     loop {}
 }

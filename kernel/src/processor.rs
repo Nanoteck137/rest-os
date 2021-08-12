@@ -6,8 +6,11 @@ use crate::mm::FrameAllocator;
 use crate::arch;
 use crate::arch::x86_64::PageTable;
 use crate::scheduler::Scheduler;
+use crate::process::Process;
 
 use alloc::string::String;
+use alloc::sync::Arc;
+use spin::RwLock;
 
 #[macro_export]
 macro_rules! core {
@@ -30,8 +33,8 @@ impl ProcessorInfo {
         self.core_id
     }
 
-    pub fn scheduler(&self) -> &Scheduler {
-        &self.scheduler
+    pub fn scheduler(&mut self) -> &mut Scheduler {
+        &mut self.scheduler
     }
 
     pub fn page_table(&self) -> PageTable {
@@ -42,9 +45,13 @@ impl ProcessorInfo {
 
         page_table
     }
+
+    pub fn process(&mut self) -> Arc<RwLock<Process>> {
+        self.scheduler.current_process()
+    }
 }
 
-pub fn get_local_info() -> &'static ProcessorInfo {
+pub fn get_local_info() -> &'static mut ProcessorInfo {
     let ptr = unsafe {
         let ptr: u64;
         asm!("mov {}, gs:[0]", out(reg) ptr);
@@ -52,7 +59,7 @@ pub fn get_local_info() -> &'static ProcessorInfo {
         ptr
     };
 
-    unsafe { &*(ptr as *const ProcessorInfo) }
+    unsafe { &mut *(ptr as *mut ProcessorInfo) }
 }
 
 pub fn init(core_id: u32)

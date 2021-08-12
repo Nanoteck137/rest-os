@@ -4,30 +4,32 @@ use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
 
 use alloc::vec::Vec;
 use alloc::sync::Arc;
-use spin::Mutex;
+use spin::{ Mutex, RwLock };
 
-static PROCESSES: Mutex<Vec<Arc<Process>>> = Mutex::new(Vec::new());
+static PROCESSES: Mutex<Vec<Arc<RwLock<Process>>>> = Mutex::new(Vec::new());
 
 extern "C" {
     fn switch_to_thread(control_block: &ThreadControlBlock);
 }
 
 pub struct Scheduler {
-    idle_process: Process
+    idle_process: Process,
+    current_pid: usize,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
         Self {
             idle_process: Process::create_idle_process(),
+            current_pid: 0,
         }
     }
 
-    pub unsafe fn next(&self) {
-        let control_block = {
-            let mut lock = PROCESSES.lock();
+    pub unsafe fn next(&mut self) {
+        let (control_block, pid) = {
+            let lock = PROCESSES.lock();
 
-            let process = Arc::get_mut(lock.get_mut(0).unwrap()).unwrap();
+            let mut process = lock.get(0).unwrap().write();
             let thread = process.thread_mut(0).unwrap();
 
             thread.set_state(ThreadState::Running);
@@ -35,14 +37,27 @@ impl Scheduler {
             let control_block = thread.control_block();
             println!("Picking next: {}", process.name());
 
-            control_block
+            (control_block, process.pid())
         };
 
+        self.current_pid = pid;
         switch_to_thread(&control_block);
     }
 
-    pub fn add_process(process: Arc<Process>) {
-        PROCESSES.lock().push(process);
+    pub fn current_process(&mut self) -> Arc<RwLock<Process>> {
+        let lock = PROCESSES.lock();
+
+        for process in lock.iter() {
+            if process.read().pid() == self.current_pid {
+                return process.clone();
+            }
+        }
+
+        panic!("No process with pid: {}", self.current_pid);
+    }
+
+    pub fn add_process(process: Process) {
+        PROCESSES.lock().push(Arc::new(RwLock::new(process)));
     }
 
     pub fn debug_dump_processes() {
@@ -51,6 +66,7 @@ impl Scheduler {
         println!("----------------");
 
         for process in lock.iter() {
+            let process = process.read();
             println!("Process - {}:{}", process.pid(), process.name());
         }
 

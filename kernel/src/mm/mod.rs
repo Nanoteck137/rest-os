@@ -9,7 +9,7 @@ use alloc::sync::{ Arc, Weak };
 use alloc::string::String;
 use alloc::collections::BTreeMap;
 
-use spin::Mutex;
+use spin::{ Mutex, RwLock };
 
 pub use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
 pub use heap_alloc::Allocator;
@@ -116,7 +116,7 @@ impl VMRegion {
 
 struct MemoryManager {
     multiboot_structure: PhysicalAddress,
-    kernel_regions: BTreeMap<usize, Arc<VMRegion>>,
+    kernel_regions: BTreeMap<usize, Arc<RwLock<VMRegion>>>,
 
     next_addr: VirtualAddress,
 
@@ -268,30 +268,35 @@ impl MemoryManager {
 
         self.next_addr.0 += pages * PAGE_SIZE;
 
-        let region = Arc::new(VMRegion {
+        let region = VMRegion {
             name,
             addr: VirtualAddress(addr),
             page_count: pages,
 
             is_mapped: false,
-        });
+        };
 
         let result = region.addr();
-        self.kernel_regions.insert(addr, region);
+        self.kernel_regions.insert(addr, Arc::new(RwLock::new(region)));
 
         Some(result)
     }
 
-    fn find_region(&mut self, vaddr: VirtualAddress) -> Option<Arc<VMRegion>> {
+    fn find_region(&mut self, vaddr: VirtualAddress)
+        -> Option<Arc<RwLock<VMRegion>>>
+    {
+        let vaddr = VirtualAddress(vaddr.0 & !0xfff);
         for region in self.kernel_regions.values() {
-            let start = region.addr();
-            let end = region.addr() + (region.page_count() * PAGE_SIZE);
+            let lock = region.read();
 
-            if start >= vaddr && vaddr < end {
+            let start = lock.addr();
+
+            assert!(lock.page_count() != 0);
+            let end = lock.addr() + ((lock.page_count() - 1) * PAGE_SIZE);
+
+            if vaddr.0 >= start.0 && vaddr.0 <= end.0 {
                 return Some(region.clone());
             }
-
-            println!("Start: {:?} End: {:?}", start, end);
         }
 
         None
@@ -333,13 +338,12 @@ impl MemoryManager {
     }
 
     fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
-        let mut region = self.find_region(vaddr)
+        let region = self.find_region(vaddr)
             .expect("Failed to find region");
-        let region = unsafe { Arc::get_mut_unchecked(&mut region) };
-        println!("Region: {:#?}", region);
+        let mut region = region.write();
 
         if !region.is_mapped {
-            self.map_region(region);
+            self.map_region(&mut region);
         }
 
         let page_table = Self::get_current_page_table();
@@ -382,6 +386,20 @@ pub fn initialize(multiboot_structure: PhysicalAddress) {
 pub fn allocate_kernel_vm(name: String, size: usize) -> Option<VirtualAddress>
 {
     MM.lock().as_mut().unwrap().allocate_kernel_vm(name, size)
+}
+
+pub fn allocate_kernel_vm_zero(name: String, size: usize)
+    -> Option<VirtualAddress>
+{
+    let res = MM.lock().as_mut().unwrap().allocate_kernel_vm(name, size);
+
+    if let Some(addr) = res {
+        unsafe {
+            core::ptr::write_bytes(addr.0 as *mut u8, 0, size);
+        }
+    }
+
+    res
 }
 
 pub fn page_fault(vaddr: VirtualAddress) -> bool {

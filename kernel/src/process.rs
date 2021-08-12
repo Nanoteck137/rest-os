@@ -1,14 +1,14 @@
 //! Module to handle processes
 
 use crate::arch::x86_64::Regs;
+use crate::mm;
+use crate::mm::PAGE_SIZE;
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::borrow::ToOwned;
 
 use core::sync::atomic::{ AtomicUsize, Ordering };
-
-static THREAD_STACK: [u8; 4096] = [0; 4096];
 
 static NEXT_PID: AtomicUsize = AtomicUsize::new(1);
 
@@ -20,6 +20,7 @@ fn next_pid() -> usize {
     NEXT_PID.fetch_add(1, Ordering::SeqCst)
 }
 
+#[derive(Debug)]
 pub struct Process {
     name: String,
     pid: usize,
@@ -31,11 +32,18 @@ pub struct Process {
 
 impl Process {
     pub fn create_idle_process() -> Self {
-        let stack_ptr = unsafe { crate::allocate_memory(128) };
-        let stack = unsafe { core::slice::from_raw_parts(stack_ptr.0 as *const u8, 128) };
+        let stack = mm::allocate_kernel_vm_zero("Idle Thread Stack".to_owned(),
+                                                PAGE_SIZE)
+            .expect("Failed to allocate stack for idle thread");
+        let stack = unsafe {
+            core::slice::from_raw_parts(stack.0 as *const u8,
+                                        PAGE_SIZE)
+        };
 
-        let thread = Thread::create_kernel_thread("Idle Thread".to_owned(), idle_thread as u64, stack);
+        let thread = Thread::create_kernel_thread("Idle Thread".to_owned(),
+                                                  idle_thread, stack);
         let mut threads = Vec::new();
+        threads.push(thread);
 
         Self {
             name: "Idle Process".to_owned(),
@@ -46,9 +54,26 @@ impl Process {
         }
     }
 
-    pub fn create_kernel_process(name: String, entry: u64) -> Self {
-        let thread = Thread::create_kernel_thread("Process thread".to_owned(),
-                                                  entry, &THREAD_STACK);
+    pub fn create_kernel_process(name: String, entry: fn()) -> Self
+    {
+        let stack =
+            if let Some(addr) =
+                mm::allocate_kernel_vm_zero(format!("'{}': Stack", name),
+                                            PAGE_SIZE)
+        {
+            addr
+        } else {
+            panic!("Failed to allocate stack memory for: {}", name);
+        };
+
+        let stack = unsafe {
+            core::slice::from_raw_parts(stack.0 as *const u8,
+                                        PAGE_SIZE)
+        };
+
+        let thread =
+            Thread::create_kernel_thread(format!("'{}': Main Thread", name),
+                                         entry, stack);
 
         let mut threads = Vec::new();
         threads.push(thread);
@@ -90,13 +115,14 @@ pub enum ThreadState {
     Done,
 }
 
+#[derive(Debug)]
 pub struct Thread {
     name: String,
     state: ThreadState,
     control_block: ThreadControlBlock,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct ThreadControlBlock {
     regs: Regs,
@@ -105,12 +131,13 @@ pub struct ThreadControlBlock {
 }
 
 impl Thread {
-    pub fn create_kernel_thread(name: String, entry: u64, stack: &'static [u8])
+    pub fn create_kernel_thread(name: String, entry: fn(),
+                                   stack: &'static [u8])
         -> Self
     {
         let control_block = ThreadControlBlock {
             regs: Regs::default(),
-            rip: entry,
+            rip: entry as u64,
             rsp: stack.as_ptr() as u64 + stack.len() as u64,
         };
 
