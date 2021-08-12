@@ -20,6 +20,7 @@ use crate::mm::{ PhysicalMemory, PhysicalAddress };
 pub enum Tag<'a> {
     CommandLine(&'a str),
     BootloaderName(&'a str),
+    Module(Module<'a>),
     BasicMemInfo(u32, u32),
     BootDev(BootDev),
     MemoryMap(MemoryMap<'a>),
@@ -29,6 +30,46 @@ pub enum Tag<'a> {
     Acpi2(usize),
     LoadBaseAddr(usize),
     Unknown(u32),
+}
+
+#[derive(Debug)]
+pub struct Module<'a> {
+    start: u32,
+    end: u32,
+    name: &'a str
+}
+
+impl<'a> Module<'a> {
+    fn new(start: u32, end: u32, name: &'a str) -> Self {
+        Self {
+            start,
+            end,
+            name,
+        }
+    }
+
+    pub fn start(&self) -> PhysicalAddress {
+        PhysicalAddress(self.start as usize)
+    }
+
+    pub fn end(&self) -> PhysicalAddress {
+        PhysicalAddress(self.end as usize)
+    }
+
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
+
+    pub unsafe fn data<P>(&self, physical_memory: &P) -> &[u8]
+        where P: PhysicalMemory
+    {
+        let length = self.end - self.start;
+        let length = length as usize;
+
+        let data = physical_memory.slice::<u8>(self.start(), length);
+
+        data
+    }
 }
 
 #[derive(Debug)]
@@ -260,6 +301,7 @@ pub enum ElfSectionType {
     PreinitArray,
     Group,
     ExtendedSectionIndicies,
+    OsSpecific(u32),
 }
 
 impl From<u32> for ElfSectionType {
@@ -283,7 +325,7 @@ impl From<u32> for ElfSectionType {
             0x11 => ElfSectionType::Group,
             0x12 => ElfSectionType::ExtendedSectionIndicies,
 
-            _ => panic!("Unknown ELF section type"),
+            _ => ElfSectionType::OsSpecific(value),
         }
     }
 }
@@ -549,11 +591,33 @@ impl<'a> Iterator for TagIter<'a> {
                 // the null terminator
                 let len = (tag_size - 8 - 1) as usize;
 
-                let cmd_line =
-                    core::str::from_utf8(
-                        &self.bytes[start..start + len]).ok()?;
+                let cmd_line = core::str::from_utf8(
+                    &self.bytes[start..start + len]).ok()?;
 
                 Tag::BootloaderName(cmd_line)
+            }
+
+            3 => {
+                // MULTIBOOT_TAG_TYPE_MODULE
+
+                let start = self.offset + 8;
+
+                let module_start = u32::from_le_bytes(
+                    self.bytes[start..start + 4].try_into().ok()?);
+                let module_end = u32::from_le_bytes(
+                    self.bytes[start + 4..start + 8].try_into().ok()?);
+
+                let len = (tag_size - 8 - 1 - 8) as usize;
+                let start = start + 8;
+
+                let name = core::str::from_utf8(
+                    &self.bytes[start..start + len]).ok()?;
+
+                Tag::Module(Module {
+                    start: module_start,
+                    end: module_end,
+                    name
+                })
             }
 
             4 => {

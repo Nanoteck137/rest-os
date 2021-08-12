@@ -142,6 +142,11 @@ fn main() {
 
     let _ = std::fs::copy(source, dest);
 
+    let source = "misc/test.txt";
+    let dest = target_dir(&["isofiles", "boot", "test.txt"]);
+
+    let _ = std::fs::copy(source, dest);
+
     println!("Creating the Image");
 
     let target = target_dir(&["image.iso"]);

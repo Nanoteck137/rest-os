@@ -69,8 +69,8 @@ fn _display_multiboot_tags(multiboot: &Multiboot) {
     for tag in multiboot.tags() {
         match tag {
             Tag::CommandLine(s) => println!("Command Line: {}", s),
-            Tag::BootloaderName(s) =>
-                println!("Bootloader Name: {}", s),
+            Tag::BootloaderName(s) => println!("Bootloader Name: {}", s),
+            Tag::Module(m) => println!("Module: {:#x?}", m),
 
             Tag::BasicMemInfo(lower, upper) =>
                 println!("Basic Memory Info - Lower: {} Upper: {}",
@@ -176,7 +176,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    // display_multiboot_tags(&multiboot);
+    _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
