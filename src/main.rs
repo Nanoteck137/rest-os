@@ -102,10 +102,73 @@ fn build_rust_projects() -> Option<()> {
     Some(())
 }
 
+fn build_userland_bin(name: &str) -> Option<()> {
+    let mut project_path = PathBuf::new();
+    project_path.push("userland");
+    project_path.push(name);
+
+    let mut target_path = PathBuf::new();
+    target_path.push("target");
+    target_path.push("userland");
+    target_path.push(name);
+
+    println!("Project Path: {:?}", project_path);
+    println!("Target Path: {:?}", target_path);
+
+    let _ = std::fs::create_dir(&target_path);
+    build_rust_project(project_path, target_path)?;
+
+    Some(())
+}
+
+fn copy_userland_bin_to_initrd(name: &str) -> Option<()> {
+    // target/userland/init/x86_64/debug/init
+    let mut source = PathBuf::new();
+    source.push("target");
+    source.push("userland");
+    source.push(name);
+    source.push("x86_64-rest-os");
+    source.push("debug");
+    source.push(name);
+
+    let mut dest = PathBuf::new();
+    dest.push("target");
+    dest.push("initrd");
+    dest.push(name);
+
+    let _ = std::fs::copy(source, dest);
+
+    Some(())
+}
+
+fn build_initrd() -> Option<()> {
+    let status = Command::new("./build_initrd.sh")
+        .current_dir("misc")
+        .status()
+            .expect("Failed to run 'build_initrd.sh'");
+
+    if !status.success() {
+        return None;
+    }
+
+    Some(())
+}
+
+fn prepare_initrd() -> Option<()> {
+    build_userland_bin("init")?;
+    copy_userland_bin_to_initrd("init")?;
+
+    build_initrd()?;
+
+    Some(())
+}
+
 fn main() {
     println!("Building Rest-OS");
 
     let _ = std::fs::create_dir("target");
+    let _ = std::fs::create_dir("target/userland");
+    let _ = std::fs::create_dir("target/initrd");
     let _ = std::fs::create_dir("target/isofiles");
     let _ = std::fs::create_dir("target/isofiles/boot");
     let _ = std::fs::create_dir("target/isofiles/boot/grub");
@@ -142,8 +205,12 @@ fn main() {
 
     let _ = std::fs::copy(source, dest);
 
-    let source = "misc/test.txt";
-    let dest = target_dir(&["isofiles", "boot", "test.txt"]);
+    println!("Preparing initrd");
+    prepare_initrd()
+        .expect("Failed to prepare initrd");
+
+    let source = target_dir(&["initrd.cpio"]);
+    let dest = target_dir(&["isofiles", "boot", "initrd.cpio"]);
 
     let _ = std::fs::copy(source, dest);
 
