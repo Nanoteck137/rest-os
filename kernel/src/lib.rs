@@ -17,6 +17,7 @@ mod multiboot;
 mod mm;
 mod process;
 mod scheduler;
+mod cpio;
 
 // Pull in the `alloc` create
 #[macro_use] extern crate alloc;
@@ -25,6 +26,7 @@ use core::panic::PanicInfo;
 use core::alloc::Layout;
 use core::convert::TryInto;
 use alloc::sync::Arc;
+use alloc::string::String;
 
 use spin::RwLock;
 
@@ -35,6 +37,7 @@ use mm::{ BOOT_PHYSICAL_MEMORY, KERNEL_PHYSICAL_MEMORY };
 use multiboot::{ Multiboot, Tag};
 use process::{ Thread, Process };
 use scheduler::Scheduler;
+use cpio::CPIO;
 
 use arch::x86_64::{ PageTable, PageType };
 
@@ -196,6 +199,15 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
         if u16::from_le_bytes(data[0..2].try_into().unwrap()) == 0o070707 {
             // Binary cpio
             println!("Binary cpio");
+
+            let cpio = CPIO::binary(data);
+            unsafe {
+                let data = cpio.read_file(String::from("init"))
+                    .expect("Failed to read the init file");
+
+                println!("Data: {:#x?}", &data[0..5]);
+                println!("Data length: {}", data.len());
+            }
         }
     });
 
