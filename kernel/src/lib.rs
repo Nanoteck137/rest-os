@@ -23,6 +23,7 @@ mod scheduler;
 
 use core::panic::PanicInfo;
 use core::alloc::Layout;
+use core::convert::TryInto;
 use alloc::sync::Arc;
 
 use spin::RwLock;
@@ -176,7 +177,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    _display_multiboot_tags(&multiboot);
+    // _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
@@ -188,6 +189,15 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     mm::initialize(PhysicalAddress(multiboot_addr));
     processor::init(0);
+
+    multiboot.modules(|m| {
+        let data = unsafe { m.data(&KERNEL_PHYSICAL_MEMORY) };
+
+        if u16::from_le_bytes(data[0..2].try_into().unwrap()) == 0o070707 {
+            // Binary cpio
+            println!("Binary cpio");
+        }
+    });
 
     use alloc::borrow::ToOwned;
     let process = Process::create_kernel_process("Kernel Init".to_owned(),

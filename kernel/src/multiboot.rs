@@ -767,4 +767,14 @@ impl<'a> Multiboot<'a> {
 
         None
     }
+
+    pub fn modules<F>(&self, callback: F)
+        where F: Fn(Module)
+    {
+        for tag in self.tags() {
+            if let Tag::Module(m) = tag {
+                callback(m);
+            }
+        }
+    }
 }
