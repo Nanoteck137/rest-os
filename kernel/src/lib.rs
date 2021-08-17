@@ -18,6 +18,7 @@ mod mm;
 mod process;
 mod scheduler;
 mod cpio;
+mod elf;
 
 // Pull in the `alloc` create
 #[macro_use] extern crate alloc;
@@ -38,6 +39,7 @@ use multiboot::{ Multiboot, Tag};
 use process::{ Thread, Process };
 use scheduler::Scheduler;
 use cpio::CPIO;
+use elf::{ Elf, ProgramHeaderType };
 
 use arch::x86_64::{ PageTable, PageType };
 
@@ -205,8 +207,19 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                 let data = cpio.read_file(String::from("init"))
                     .expect("Failed to read the init file");
 
-                println!("Data: {:#x?}", &data[0..5]);
-                println!("Data length: {}", data.len());
+                let elf = Elf::parse(data)
+                    .expect("Failed to parse 'init'");
+
+                for program_header in elf.program_headers() {
+                    if program_header.typ() == ProgramHeaderType::Load {
+                        println!("Load: {:#x?}", program_header);
+
+                        let data = elf.program_data(program_header);
+                        println!("Data: {:#x?}", data);
+                    }
+                }
+
+                // println!("Elf: {:#x?}", elf);
             }
         }
     });
