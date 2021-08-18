@@ -326,7 +326,7 @@ impl<'a> Elf<'a> {
                                self.num_program_table_entries)
     }
 
-    pub fn program_data(&self, program_header: ProgramHeader) -> &'a [u8] {
+    pub fn program_data(&self, program_header: &ProgramHeader) -> &'a [u8] {
         let size = program_header.file_size() as usize;
         let start = program_header.offset() as usize;
         let end = start + size;

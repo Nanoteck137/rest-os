@@ -26,10 +26,11 @@ mod elf;
 use core::panic::PanicInfo;
 use core::alloc::Layout;
 use core::convert::TryInto;
+use alloc::vec::Vec;
 use alloc::sync::Arc;
 use alloc::string::String;
 
-use spin::RwLock;
+use spin::{ Mutex, RwLock };
 
 use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
@@ -161,6 +162,15 @@ unsafe fn allocate_memory(size: usize) -> VirtualAddress {
 
 static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
 
+static CPIO: Mutex<Option<CPIO>> = Mutex::new(None);
+
+fn read_initrd_file(path: String) -> Option<Vec<u8>> {
+    let data =
+        unsafe { CPIO.lock().as_ref().unwrap().read_file(path)?.to_vec() };
+
+    Some(data)
+}
+
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
     arch::initialize();
@@ -202,7 +212,12 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             // Binary cpio
             println!("Binary cpio");
 
-            let cpio = CPIO::binary(data);
+            let cpio = CPIO::binary(data.to_vec());
+            {
+                *CPIO.lock() = Some(cpio);
+            }
+
+            /*
             unsafe {
                 let data = cpio.read_file(String::from("init"))
                     .expect("Failed to read the init file");
@@ -214,17 +229,28 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                     if program_header.typ() == ProgramHeaderType::Load {
                         println!("Load: {:#x?}", program_header);
 
-                        let data = elf.program_data(program_header);
+                        let data = elf.program_data(&program_header);
                         println!("Data: {:#x?}", data);
+                        let size = program_header.memory_size() as usize;
+                        mm::map_in_userspace(program_header.vaddr(), size)
+                            .expect("Failed to map in userspace");
+
+                        let source = data.as_ptr();
+                        let dest = program_header.vaddr().0 as *mut u8;
+                        let count = size;
+                        core::ptr::copy_nonoverlapping(source, dest, count);
                     }
                 }
 
                 // println!("Elf: {:#x?}", elf);
             }
+                */
         }
     });
 
     use alloc::borrow::ToOwned;
+    let file = read_initrd_file("init".to_owned());
+
     let process = Process::create_kernel_process("Kernel Init".to_owned(),
                                                  kernel_init_thread);
 
@@ -241,6 +267,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
     println!("Current Process: {:#x?}", core!().process());
+
+    // TODO(patrik):
+    // replace_process_image("init");
 
     loop {}
 }

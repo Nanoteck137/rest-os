@@ -58,6 +58,19 @@ impl Entry {
         }
     }
 
+    // Is the entry user accessible
+    fn is_user(&self) -> bool {
+        self.0 & PAGE_USER != 0
+    }
+
+    /// Set the user accessible flag
+    fn set_user(&mut self, value: bool) {
+        self.0 &= !PAGE_USER;
+        if value {
+            self.0 |= PAGE_USER;
+        }
+    }
+
     // Is the entry huge
     fn is_huge(&self) -> bool {
         self.0 & PAGE_HUGE != 0
@@ -181,6 +194,35 @@ impl PageTable {
         where F: FrameAllocator,
               P: PhysicalMemory
     {
+        self.map_raw_option(frame_allocator, physical_memory,
+                            vaddr, paddr, page_type, false)
+    }
+
+    pub unsafe fn map_raw_user<F, P>(&mut self,
+                                     frame_allocator: &mut F, physical_memory: &P,
+                                     vaddr: VirtualAddress,
+                                     paddr: PhysicalAddress,
+                                     page_type: PageType)
+        -> Option<()>
+
+        where F: FrameAllocator,
+              P: PhysicalMemory
+    {
+        self.map_raw_option(frame_allocator, physical_memory,
+                            vaddr, paddr, page_type, true)
+    }
+
+    pub unsafe fn map_raw_option<F, P>(&mut self,
+                                       frame_allocator: &mut F, physical_memory: &P,
+                                       vaddr: VirtualAddress,
+                                       paddr: PhysicalAddress,
+                                       page_type: PageType,
+                                       user: bool)
+        -> Option<()>
+
+        where F: FrameAllocator,
+              P: PhysicalMemory
+    {
         let mapping = self.translate_mapping(physical_memory, vaddr)?;
 
         let mut entries = [
@@ -232,6 +274,7 @@ impl PageTable {
         entry.set_address(paddr);
         entry.set_present(true);
         entry.set_writable(true);
+        entry.set_user(user);
         if page_type != PageType::Page4K {
             entry.set_huge(true);
         }

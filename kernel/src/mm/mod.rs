@@ -282,6 +282,31 @@ impl MemoryManager {
         Some(result)
     }
 
+    fn map_in_userspace(&mut self, vaddr: VirtualAddress, size: usize)
+        -> Option<()>
+    {
+        let pages = size / PAGE_SIZE + 1;
+
+
+        let page_table = &mut self.reference_page_table;
+
+        for page in 0..pages {
+            unsafe {
+                let frame = self.frame_allocator.alloc_frame()
+                    .expect("Failed to allocate frame");
+
+                page_table.map_raw_user(&mut self.frame_allocator,
+                                   &crate::KERNEL_PHYSICAL_MEMORY,
+                                   vaddr + (page * PAGE_SIZE),
+                                   PhysicalAddress::from(frame),
+                                   PageType::Page4K)
+                    .expect("Failed to map");
+            }
+        }
+
+        Some(())
+    }
+
     fn find_region(&mut self, vaddr: VirtualAddress)
         -> Option<Arc<RwLock<VMRegion>>>
     {
@@ -400,6 +425,10 @@ pub fn allocate_kernel_vm_zero(name: String, size: usize)
     }
 
     res
+}
+
+pub fn map_in_userspace(vaddr: VirtualAddress, size: usize) -> Option<()> {
+    MM.lock().as_mut().unwrap().map_in_userspace(vaddr, size)
 }
 
 pub fn page_fault(vaddr: VirtualAddress) -> bool {

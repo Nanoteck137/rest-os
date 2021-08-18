@@ -1,6 +1,7 @@
 //! Module to handle and read from a CPIO archive file
 
 use alloc::string::String;
+use alloc::vec::Vec;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -18,12 +19,12 @@ struct CPIOHeader {
     filesize: [u16; 2],
 }
 
-pub struct CPIO<'a> {
-    data: &'a [u8],
+pub struct CPIO {
+    data: Vec<u8>,
 }
 
-impl<'a> CPIO<'a> {
-    pub fn binary(data: &'a [u8]) -> Self {
+impl CPIO {
+    pub fn binary(data: Vec<u8>) -> Self {
         Self {
             data
         }
