@@ -177,6 +177,9 @@ switch_to_userspace:
     // Pop the value to set RDI
     pop rdi
 
+    // Swap the gs to the user gs is used insteed of the kernel gs
+    swapgs
+
     iretq
 
 .global switch_to_kernel_thread
