@@ -50,7 +50,7 @@ fn _start() -> ! {
             .expect("Unknown error code")
     };
 
-    write!(&mut writer, "Syscall Result: {:?}", res);
+    write!(&mut writer, "Syscall Result: {:?}\n", res);
 
     loop {}
 }

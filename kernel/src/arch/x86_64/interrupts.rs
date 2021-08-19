@@ -119,10 +119,16 @@ unsafe extern fn interrupt_handler(number: u8,
             }
         }
     } else {
-        println!("CPU Interrupts: {}", number);
-        println!("Frame: {:#x?}", frame);
-        println!("Error: {:#x?}", error);
-        println!("Regs: {:#x?}", regs);
+        if number == 32 {
+            print!(".");
+        } else {
+            println!("CPU Interrupts: {}", number);
+            println!("Frame: {:#x?}", frame);
+            println!("Error: {:#x?}", error);
+            println!("Regs: {:#x?}", regs);
+        }
+
+        super::pic::send_eoi(number);
     }
 }
 

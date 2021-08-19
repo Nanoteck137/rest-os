@@ -33,9 +33,9 @@ pub(super) fn initialize() {
 fn syscall_handler(regs: &mut Regs) {
     let number = regs.rax;
     let arg0 = regs.rdi;
-    let arg1 = regs.rsi;
-    let arg2 = regs.rdx;
-    let arg3 = regs.r10;
+    let _arg1 = regs.rsi;
+    let _arg2 = regs.rdx;
+    let _arg3 = regs.r10;
 
     /*
     println!("Syscall Number: {}", number);
@@ -51,7 +51,7 @@ fn syscall_handler(regs: &mut Regs) {
         SERIAL_PORT.lock().as_mut().unwrap().output_char(arg0 as u8 as char);
     }
 
-    regs.rax = KernelError::TestError as u64;
+    regs.rax = KernelError::NoError as u64;
 }
 
 global_asm!(r#"

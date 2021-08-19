@@ -280,13 +280,11 @@ fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
     // println!("Current Process: {:#x?}", core!().process());
 
-    unsafe {
-        asm!("mov al, 0xff
-            out 0xa1, al
-            out 0x21, al");
-    }
+    arch::x86_64::pic::enable(0x0001);
 
-    // TODO(patrik):
+    // let file = fs::open("/init");
+    // let data = fs::read(file);
+
     scheduler::replace_process_image(String::from("init"));
 
     loop {}

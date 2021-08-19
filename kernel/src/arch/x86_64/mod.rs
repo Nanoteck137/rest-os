@@ -12,6 +12,7 @@ mod page_table;
 mod serial;
 mod gdt;
 mod interrupts;
+pub mod pic;
 mod syscall;
 
 const MSR_FS_BASE:        u32 = 0xc0000100;
@@ -136,6 +137,7 @@ pub unsafe fn write_kernel_gs_base(base: u64) {
 
 pub fn early_initialize() {
     serial::initialize();
+    pic::initialize();
 }
 
 pub fn initialize() {
