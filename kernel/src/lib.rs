@@ -164,9 +164,14 @@ static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
 
 static CPIO: Mutex<Option<CPIO>> = Mutex::new(None);
 
-pub fn read_initrd_file(path: String) -> Option<Vec<u8>> {
-    let data =
-        unsafe { CPIO.lock().as_ref().unwrap().read_file(path)?.to_vec() };
+pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
+    let data = unsafe {
+        let lock = CPIO.lock();
+        let lock = lock.as_ref().unwrap();
+        let slice = lock.read_file(path)?;
+
+        (slice.as_ptr(), slice.len())
+    };
 
     Some(data)
 }
@@ -267,6 +272,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
 fn kernel_init_thread() {
     // TODO(patrik): Here we can release the stack we used from the bootloader.
+
     println!("kernel_init_thread: Hello World");
     // println!("Current Process: {:#x?}", core!().process());
 

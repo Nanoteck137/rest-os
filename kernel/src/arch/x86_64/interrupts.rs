@@ -115,6 +115,7 @@ unsafe extern fn interrupt_handler(number: u8,
                 println!("Frame: {:#x?}", frame);
                 println!("Error: {:#x?}", error);
                 println!("Regs: {:#x?}", regs);
+                panic!();
             }
         }
     } else {

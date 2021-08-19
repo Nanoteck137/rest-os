@@ -2,7 +2,7 @@ use spin::Mutex;
 
 use super::{ out8, in8 };
 
-struct SerialPort {
+pub(super) struct SerialPort {
     port: u16,
 }
 
@@ -28,7 +28,7 @@ impl SerialPort {
         return unsafe { in8(self.port + 5) } & 0x20 != 0;
     }
 
-    fn output_char(&mut self, c: char) {
+    pub(super) fn output_char(&mut self, c: char) {
         while !self.is_transmit_empty() {}
 
         unsafe {
@@ -47,7 +47,7 @@ impl core::fmt::Write for SerialPort {
     }
 }
 
-static SERIAL_PORT: Mutex<Option<SerialPort>> = Mutex::new(None);
+pub(super) static SERIAL_PORT: Mutex<Option<SerialPort>> = Mutex::new(None);
 
 pub fn initialize() {
     {

@@ -69,10 +69,9 @@ pub struct GDT {
     null:        GDTEntry, // 0x00
     kernel_code: GDTEntry, // 0x08
     kernel_data: GDTEntry, // 0x10
-    user_null:   GDTEntry, // 0x18
-    user_code:   GDTEntry, // 0x20
+    tss:         TSSEntry, // 0x18
     user_data:   GDTEntry, // 0x28
-    tss:         TSSEntry, // 0x30
+    user_code:   GDTEntry, // 0x30
 }
 
 extern "C" {
@@ -102,10 +101,9 @@ pub(super) fn initialize() {
         null: GDTEntry::new(0, 0, 0, 0),
         kernel_code: GDTEntry::new(0, 0, 0x9a, 0x0a),
         kernel_data: GDTEntry::new(0, 0, 0x92, 0x0a),
-        user_null: GDTEntry::new(0, 0, 0, 0),
-        user_code: GDTEntry::new(0, 0, 0xfa, 0x0a),
-        user_data: GDTEntry::new(0, 0, 0xf2, 0x0a),
         tss: TSSEntry { low: tss_low, high: tss_high },
+        user_data: GDTEntry::new(0, 0, 0xf2, 0x0a),
+        user_code: GDTEntry::new(0, 0, 0xfa, 0x0a),
     });
 
     // Define the GDT descriptor so it points to the our custom GDT table
@@ -135,7 +133,7 @@ load_gdt:
     mov es, ax
     mov ss, ax
 
-    mov ax, 0x30
+    mov ax, 0x18
     ltr ax
 
     // Setup the code segment by far jumping to the return address

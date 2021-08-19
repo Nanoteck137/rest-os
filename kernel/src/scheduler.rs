@@ -1,6 +1,7 @@
 //! Module to schedule processes and threads
 
 use crate::mm;
+use crate::mm::{ VirtualAddress, PAGE_SIZE };
 use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
 use crate::elf::{ Elf, ProgramHeaderType };
 
@@ -78,6 +79,17 @@ impl Scheduler {
             }
         }
 
+        let stack_start = VirtualAddress(0x0000700000000000);
+        let stack_size = PAGE_SIZE * 4;
+        mm::map_in_userspace(stack_start, stack_size)
+            .expect("Failed to map in stack");
+
+        unsafe {
+            core::ptr::write_bytes(stack_start.0 as *mut u8, 0, stack_size);
+        }
+
+        main_thread.control_block.rsp = (stack_start.0 + stack_size) as u64;
+
         core::mem::drop(lock);
         core::mem::drop(process);
 
@@ -131,8 +143,9 @@ impl Scheduler {
 }
 
 pub fn replace_process_image(path: String) {
-    let file = crate::read_initrd_file(path)
+    let (ptr, size) = crate::read_initrd_file(path)
         .expect("Failed to find file");
+    let file = unsafe { core::slice::from_raw_parts(ptr, size) };
     let elf = Elf::parse(&file)
         .expect("Failed to parse file");
 
@@ -151,8 +164,8 @@ switch_to_userspace:
     push 0x28 | 3
     // RSP
     push QWORD PTR [rdi + 0x80]
-    push QWORD PTR 0x200
-    push 0x20 | 3
+    push QWORD PTR 0x202
+    push 0x30 | 3
     // RIP
     push QWORD PTR [rdi + 0x78]
 

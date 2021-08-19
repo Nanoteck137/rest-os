@@ -1,7 +1,7 @@
 //! Module to interface with processor
 
 use crate::mm;
-use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
+use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory, PAGE_SIZE };
 use crate::mm::FrameAllocator;
 use crate::arch;
 use crate::arch::ArchInfo;
@@ -23,6 +23,8 @@ macro_rules! core {
 #[repr(C)]
 pub struct ProcessorInfo {
     address: usize,
+    syscall_stack: usize,
+    syscall_saved_stack: usize,
     core_id: u32,
 
     arch: ArchInfo,
@@ -77,9 +79,17 @@ pub fn init(core_id: u32)
 
     println!("Returned addr: {:?}", addr);
 
+    let stack_size = PAGE_SIZE * 2;
+    let stack_addr =
+        mm::allocate_kernel_vm(format!("Core {}: Syscall Stack", core_id),
+                               stack_size)
+        .expect("Failed to allocate memory for Processor Info");
+
     // Create the structure for the core infomation
     let processor_info = ProcessorInfo {
         address: addr.0,
+        syscall_stack: stack_addr.0 + stack_size,
+        syscall_saved_stack: 0,
         core_id,
 
         arch: ArchInfo::new(),

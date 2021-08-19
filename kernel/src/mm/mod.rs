@@ -302,7 +302,7 @@ impl MemoryManager {
                 let vaddr = vaddr + (page * PAGE_SIZE);
                 page_table.map_raw_user(&mut self.frame_allocator,
                                    &crate::KERNEL_PHYSICAL_MEMORY,
-                                   vaddr + (page * PAGE_SIZE),
+                                   vaddr,
                                    PhysicalAddress::from(frame),
                                    PageType::Page4K)
                     .expect("Failed to map");

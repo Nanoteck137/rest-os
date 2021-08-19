@@ -12,10 +12,16 @@ mod page_table;
 mod serial;
 mod gdt;
 mod interrupts;
+mod syscall;
 
 const MSR_FS_BASE:        u32 = 0xc0000100;
 const MSR_GS_BASE:        u32 = 0xc0000101;
 const MSR_KERNEL_GS_BASE: u32 = 0xc0000102;
+
+const MSR_EFER:  u32 = 0xc0000080;
+const MSR_STAR:  u32 = 0xc0000081;
+const MSR_LSTAR: u32 = 0xc0000082;
+const MSR_FMASK: u32 = 0xc0000084;
 
 pub struct ArchInfo {
     gdt: Option<Box<GDT>>,
@@ -135,6 +141,7 @@ pub fn early_initialize() {
 pub fn initialize() {
     gdt::initialize();
     interrupts::initialize();
+    syscall::initialize();
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
