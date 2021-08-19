@@ -22,6 +22,8 @@ mod elf;
 
 // Pull in the `alloc` create
 #[macro_use] extern crate alloc;
+/// Pull in the kernel api crate
+#[macro_use] extern crate kernel_api;
 
 use core::panic::PanicInfo;
 use core::alloc::Layout;
@@ -219,7 +221,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             // Binary cpio
             println!("Binary cpio");
 
-            let cpio = CPIO::binary(data.to_vec());
+            let addr = VirtualAddress(data.as_ptr() as usize);
+            let size = data.len();
+            let cpio = CPIO::binary(addr, size);
             {
                 *CPIO.lock() = Some(cpio);
             }

@@ -146,6 +146,7 @@ pub fn replace_process_image(path: String) {
     let (ptr, size) = crate::read_initrd_file(path)
         .expect("Failed to find file");
     let file = unsafe { core::slice::from_raw_parts(ptr, size) };
+
     let elf = Elf::parse(&file)
         .expect("Failed to parse file");
 

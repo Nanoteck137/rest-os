@@ -10,6 +10,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 spin = "0.9.2"
+kernel_api = { path = "../shared/kernel_api" }
 
 [profile.dev]
 panic = "abort"

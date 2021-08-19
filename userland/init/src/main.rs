@@ -2,6 +2,11 @@
 #![no_std]
 #![no_main]
 
+extern crate kernel_api;
+
+use kernel_api::KernelError;
+
+use core::convert::TryFrom;
 use core::panic::PanicInfo;
 
 extern "C" {
@@ -15,12 +20,37 @@ fn putc(c: char) {
     }
 }
 
-#[no_mangle]
-fn _start() -> ! {
-    let s = "Hello World from init\n";
-    for c in s.chars() {
+struct Writer;
+
+impl Writer {
+    fn output_char(&self, c: char) {
         putc(c);
     }
+}
+
+impl core::fmt::Write for Writer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+            self.output_char(c);
+        }
+        Ok(())
+    }
+}
+
+#[no_mangle]
+fn _start() -> ! {
+    use core::fmt::Write;
+    let mut writer = Writer {};
+
+    write!(&mut writer, "Hello World: {}\n", 123);
+
+    let res = unsafe {
+        let res = do_syscall(0x11, 0, 0, 0, 0);
+        KernelError::try_from(res)
+            .expect("Unknown error code")
+    };
+
+    write!(&mut writer, "Syscall Result: {:?}", res);
 
     loop {}
 }

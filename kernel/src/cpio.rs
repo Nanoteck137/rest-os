@@ -1,5 +1,7 @@
 //! Module to handle and read from a CPIO archive file
 
+use crate::mm::VirtualAddress;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -19,12 +21,14 @@ struct CPIOHeader {
     filesize: [u16; 2],
 }
 
-pub struct CPIO {
-    data: Vec<u8>,
+pub struct CPIO<'a> {
+    data: &'a [u8],
 }
 
-impl CPIO {
-    pub fn binary(data: Vec<u8>) -> Self {
+impl<'a> CPIO<'a> {
+    pub fn binary(data_addr: VirtualAddress, data_size: usize) -> Self {
+        let data = unsafe {
+            core::slice::from_raw_parts(data_addr.0 as *const u8, data_size) };
         Self {
             data
         }
