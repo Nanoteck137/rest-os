@@ -261,6 +261,7 @@ impl PageTable {
                 new_entry.set_address(new_table);
                 new_entry.set_present(true);
                 new_entry.set_writable(true);
+                new_entry.set_user(user);
                 physical_memory.write::<Entry>(addr, new_entry);
 
                 entries[index] = Some(PhysicalAddress(

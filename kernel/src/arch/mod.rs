@@ -2,6 +2,12 @@
 
 pub mod x86_64;
 
+pub use x86_64::ArchInfo;
+
+pub fn early_initialize() {
+    x86_64::early_initialize();
+}
+
 pub fn initialize() {
     x86_64::initialize();
 }

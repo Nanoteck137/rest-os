@@ -4,6 +4,10 @@
 
 pub use page_table::{ PageTable, PageType };
 
+use gdt::{ GDT, TSS };
+
+use alloc::boxed::Box;
+
 mod page_table;
 mod serial;
 mod gdt;
@@ -12,6 +16,20 @@ mod interrupts;
 const MSR_FS_BASE:        u32 = 0xc0000100;
 const MSR_GS_BASE:        u32 = 0xc0000101;
 const MSR_KERNEL_GS_BASE: u32 = 0xc0000102;
+
+pub struct ArchInfo {
+    gdt: Option<Box<GDT>>,
+    tss: Option<Box<TSS>>,
+}
+
+impl ArchInfo {
+    pub fn new() -> Self {
+        Self {
+            gdt: None,
+            tss: None,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
@@ -110,8 +128,11 @@ pub unsafe fn write_kernel_gs_base(base: u64) {
     wrmsr(MSR_KERNEL_GS_BASE, base)
 }
 
-pub fn initialize() {
+pub fn early_initialize() {
     serial::initialize();
+}
+
+pub fn initialize() {
     gdt::initialize();
     interrupts::initialize();
 }

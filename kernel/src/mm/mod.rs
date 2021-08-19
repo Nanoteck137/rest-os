@@ -277,7 +277,11 @@ impl MemoryManager {
         };
 
         let result = region.addr();
-        self.kernel_regions.insert(addr, Arc::new(RwLock::new(region)));
+        let region = Arc::new(RwLock::new(region));
+        self.kernel_regions.insert(addr, region.clone());
+
+        let mut region = region.write();
+        self.map_region(&mut region);
 
         Some(result)
     }
@@ -295,6 +299,7 @@ impl MemoryManager {
                 let frame = self.frame_allocator.alloc_frame()
                     .expect("Failed to allocate frame");
 
+                let vaddr = vaddr + (page * PAGE_SIZE);
                 page_table.map_raw_user(&mut self.frame_allocator,
                                    &crate::KERNEL_PHYSICAL_MEMORY,
                                    vaddr + (page * PAGE_SIZE),
@@ -350,7 +355,7 @@ impl MemoryManager {
             }
         }
 
-        region.is_mapped = false;
+        region.is_mapped = true;
     }
 
     fn get_current_page_table() -> PageTable {
@@ -398,7 +403,7 @@ impl MemoryManager {
             return self.page_fault_vmalloc(vaddr);
         }
 
-        true
+        false
     }
 }
 

@@ -60,7 +60,13 @@ static mut IDT: IDT = IDT {
 pub(super) fn initialize() {
     unsafe {
         for i in 0..256 {
-            IDT.entries[i] = IDTEntry::new(0x8, INT_HANDLERS[i] as u64, 0, 0xe, 0);
+            let ist = match i {
+                2 | 8 | 18 => 1,
+                _ => 2,
+            };
+
+            IDT.entries[i] =
+                IDTEntry::new(0x8, INT_HANDLERS[i] as u64, ist, 0xe, 0);
         }
     }
 

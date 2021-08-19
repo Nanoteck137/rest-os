@@ -164,7 +164,7 @@ static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
 
 static CPIO: Mutex<Option<CPIO>> = Mutex::new(None);
 
-fn read_initrd_file(path: String) -> Option<Vec<u8>> {
+pub fn read_initrd_file(path: String) -> Option<Vec<u8>> {
     let data =
         unsafe { CPIO.lock().as_ref().unwrap().read_file(path)?.to_vec() };
 
@@ -173,7 +173,7 @@ fn read_initrd_file(path: String) -> Option<Vec<u8>> {
 
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
-    arch::initialize();
+    arch::early_initialize();
 
     // Clear the display
     let ptr = 0xb8000 as *mut u16;
@@ -204,6 +204,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     mm::initialize(PhysicalAddress(multiboot_addr));
     processor::init(0);
+
+    arch::initialize();
 
     multiboot.modules(|m| {
         let data = unsafe { m.data(&KERNEL_PHYSICAL_MEMORY) };
@@ -249,7 +251,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     });
 
     use alloc::borrow::ToOwned;
-    let file = read_initrd_file("init".to_owned());
 
     let process = Process::create_kernel_process("Kernel Init".to_owned(),
                                                  kernel_init_thread);
@@ -266,10 +267,16 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
 fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
-    println!("Current Process: {:#x?}", core!().process());
+    // println!("Current Process: {:#x?}", core!().process());
+
+    unsafe {
+        asm!("mov al, 0xff
+            out 0xa1, al
+            out 0x21, al");
+    }
 
     // TODO(patrik):
-    // replace_process_image("init");
+    scheduler::replace_process_image(String::from("init"));
 
     loop {}
 }

@@ -333,6 +333,10 @@ impl<'a> Elf<'a> {
 
         &self.bytes[start..end]
     }
+
+    pub fn entry(&self) -> u64 {
+        self.entry
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

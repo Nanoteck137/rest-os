@@ -1,6 +1,7 @@
 //! Module to handle processes
 
 use crate::arch::x86_64::Regs;
+use crate::elf::{ Elf, ProgramHeaderType };
 use crate::mm;
 use crate::mm::PAGE_SIZE;
 
@@ -98,6 +99,14 @@ impl Process {
         self.pid
     }
 
+    pub fn kernel(&self) -> bool {
+        self.kernel
+    }
+
+    pub fn set_kernel(&mut self, value: bool) {
+        self.kernel = value;
+    }
+
     pub fn thread(&self, i: usize) -> Option<&Thread> {
         self.threads.get(i)
     }
@@ -119,15 +128,15 @@ pub enum ThreadState {
 pub struct Thread {
     name: String,
     state: ThreadState,
-    control_block: ThreadControlBlock,
+    pub control_block: ThreadControlBlock,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 #[repr(C, packed)]
 pub struct ThreadControlBlock {
-    regs: Regs,
-    rip: u64,
-    rsp: u64,
+    pub regs: Regs,
+    pub rip: u64,
+    pub rsp: u64,
 }
 
 impl Thread {
@@ -146,6 +155,10 @@ impl Thread {
             state: ThreadState::Ready,
             control_block,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.control_block = ThreadControlBlock::default();
     }
 
     pub fn state(&self) -> ThreadState {

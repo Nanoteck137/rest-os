@@ -4,6 +4,7 @@ use crate::mm;
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory };
 use crate::mm::FrameAllocator;
 use crate::arch;
+use crate::arch::ArchInfo;
 use crate::arch::x86_64::PageTable;
 use crate::scheduler::Scheduler;
 use crate::process::Process;
@@ -21,8 +22,10 @@ macro_rules! core {
 
 #[repr(C)]
 pub struct ProcessorInfo {
-    address: VirtualAddress,
+    address: usize,
     core_id: u32,
+
+    arch: ArchInfo,
 
     // This cores own scheduler
     scheduler: Scheduler
@@ -35,6 +38,10 @@ impl ProcessorInfo {
 
     pub fn scheduler(&mut self) -> &mut Scheduler {
         &mut self.scheduler
+    }
+
+    pub fn arch(&mut self) -> &mut ArchInfo {
+        &mut self.arch
     }
 
     pub fn page_table(&self) -> PageTable {
@@ -72,8 +79,10 @@ pub fn init(core_id: u32)
 
     // Create the structure for the core infomation
     let processor_info = ProcessorInfo {
-        address: addr,
+        address: addr.0,
         core_id,
+
+        arch: ArchInfo::new(),
 
         scheduler: Scheduler::new(),
     };
@@ -83,6 +92,7 @@ pub fn init(core_id: u32)
         core::ptr::write(addr.0 as *mut ProcessorInfo, processor_info);
         // Set the kernel gs base to that we can access that infomation
         arch::x86_64::write_kernel_gs_base(addr.0 as u64);
+
         // We need to swapgs to have the kernel gs as the current gs
         asm!("swapgs");
 
