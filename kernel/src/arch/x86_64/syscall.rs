@@ -29,11 +29,24 @@ pub(super) fn initialize() {
     }
 }
 
+unsafe fn user_write<T>(user_addr: u64, value: T) -> Option<()> {
+    // TODO(patrik): Validate the addr
+
+    if user_addr == 0 {
+        return None;
+    }
+
+    let ptr = user_addr as *mut T;
+    core::ptr::write(ptr, value);
+
+    Some(())
+}
+
 #[no_mangle]
 fn syscall_handler(regs: &mut Regs) {
     let number = regs.rax;
     let arg0 = regs.rdi;
-    let _arg1 = regs.rsi;
+    let arg1 = regs.rsi;
     let _arg2 = regs.rdx;
     let _arg3 = regs.r10;
 
@@ -49,15 +62,27 @@ fn syscall_handler(regs: &mut Regs) {
 
     if number == 0x10 {
         SERIAL_PORT.lock().as_mut().unwrap().output_char(arg0 as u8 as char);
+        regs.rax = KernelError::Success as u64;
     }
 
-    regs.rax = KernelError::NoError as u64;
+    if number == 0x11 {
+        println!("Current Process: {:#x?}", core!().process());
+
+        unsafe {
+            if let Some(_) = user_write::<u64>(arg0, 0x1337) {
+                regs.rax = KernelError::Success as u64;
+            } else {
+                regs.rax = KernelError::TestError as u64;
+            }
+        }
+    }
 }
 
 global_asm!(r#"
 .extern syscall_handler
 .global syscall_entry
 syscall_entry:
+    cli
     swapgs
 
     mov gs:[0x10], rsp // Save the user stack

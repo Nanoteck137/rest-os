@@ -45,7 +45,15 @@ fn _start() -> ! {
     write!(&mut writer, "Hello World: {}\n", 123);
 
     let res = unsafe {
-        let res = do_syscall(0x11, 0, 0, 0, 0);
+        let mut value = 0u64;
+
+        let ptr = &mut value as *mut _;
+        let addr = ptr as u64;
+        write!(&mut writer, "Ptr: {:?}\n", ptr);
+
+        write!(&mut writer, "Before: {:#x}\n", value);
+        let res = do_syscall(0x11, addr, 0, 0, 0);
+        write!(&mut writer, "After: {:#x}\n", value);
         KernelError::try_from(res)
             .expect("Unknown error code")
     };

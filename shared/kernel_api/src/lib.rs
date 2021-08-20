@@ -8,7 +8,7 @@ use core::convert::TryFrom;
 #[repr(u64)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum KernelError {
-    NoError = 0,
+    Success = 0,
     TestError = 123,
 }
 
@@ -17,7 +17,7 @@ impl TryFrom<u64> for KernelError {
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::NoError),
+            0 => Ok(Self::Success),
             123 => Ok(Self::TestError),
 
             _ => Err(value),
