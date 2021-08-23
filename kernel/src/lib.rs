@@ -227,35 +227,6 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             {
                 *CPIO.lock() = Some(cpio);
             }
-
-            /*
-            unsafe {
-                let data = cpio.read_file(String::from("init"))
-                    .expect("Failed to read the init file");
-
-                let elf = Elf::parse(data)
-                    .expect("Failed to parse 'init'");
-
-                for program_header in elf.program_headers() {
-                    if program_header.typ() == ProgramHeaderType::Load {
-                        println!("Load: {:#x?}", program_header);
-
-                        let data = elf.program_data(&program_header);
-                        println!("Data: {:#x?}", data);
-                        let size = program_header.memory_size() as usize;
-                        mm::map_in_userspace(program_header.vaddr(), size)
-                            .expect("Failed to map in userspace");
-
-                        let source = data.as_ptr();
-                        let dest = program_header.vaddr().0 as *mut u8;
-                        let count = size;
-                        core::ptr::copy_nonoverlapping(source, dest, count);
-                    }
-                }
-
-                // println!("Elf: {:#x?}", elf);
-            }
-                */
         }
     });
 
