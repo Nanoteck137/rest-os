@@ -46,6 +46,18 @@ use elf::{ Elf, ProgramHeaderType };
 
 use arch::x86_64::{ PageTable, PageType };
 
+macro_rules! version {
+    () => (env!("CARGO_PKG_VERSION"))
+}
+
+macro_rules! toolchain {
+    () => (env!("RUSTUP_TOOLCHAIN"))
+}
+
+macro_rules! banner {
+    () => (concat!("RestOS Version ", version!(), " ", toolchain!()))
+}
+
 fn display_memory_map(multiboot: &Multiboot) {
     let memory_map = multiboot.find_memory_map()
         .expect("Failed to find memory map");
@@ -157,13 +169,6 @@ fn initialize_heap() {
     }
 }
 
-unsafe fn allocate_memory(size: usize) -> VirtualAddress {
-    ALLOCATOR.lock().alloc_memory(Layout::from_size_align(size, 8).unwrap())
-        .expect("Failed to allocate memory")
-}
-
-static THREAD_STACK: [u8; 4096 * 4] = [0; 4096 * 4];
-
 static CPIO: Mutex<Option<CPIO>> = Mutex::new(None);
 
 pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
@@ -189,6 +194,8 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
             *ptr.offset(i) = 0x0000;
         }
     }
+
+    println!("{}", banner!());
 
     // Initialize the kernel heap
     initialize_heap();
