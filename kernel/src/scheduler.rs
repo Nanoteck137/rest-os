@@ -2,108 +2,72 @@
 
 use crate::mm;
 use crate::mm::{ VirtualAddress, PAGE_SIZE };
-use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
+//use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
+use crate::process::{ Task, ControlBlock };
 use crate::elf::{ Elf, ProgramHeaderType };
 
-use alloc::vec::Vec;
+use alloc::collections::LinkedList;
 use alloc::sync::Arc;
 use alloc::string::String;
 use spin::{ Mutex, RwLock };
 
-static PROCESSES: Mutex<Vec<Arc<RwLock<Process>>>> = Mutex::new(Vec::new());
+// static PROCESSES: Mutex<Vec<Arc<RwLock<Process>>>> = Mutex::new(Vec::new());
+// TODO(patrik): Replace mutex with a mutex thats disables interrupts?
+static TASKS: Mutex<LinkedList<Arc<RwLock<Task>>>> =
+    Mutex::new(LinkedList::new());
 
 extern "C" {
-    fn switch_to_userspace(control_block: &ThreadControlBlock);
-    fn switch_to_kernel_thread(control_block: &ThreadControlBlock);
+    fn switch_to_userspace(control_block: &ControlBlock);
+    fn switch_to_kernel(control_block: &ControlBlock);
 }
 
 pub struct Scheduler {
-    idle_process: Process,
-    current_pid: usize,
+    current_task: Option<Arc<RwLock<Task>>>,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
         Self {
-            idle_process: Process::create_idle_process(),
-            current_pid: 0,
+            current_task: None,
         }
     }
 
     pub unsafe fn next(&mut self) {
-        let (control_block, pid) = {
-            let lock = PROCESSES.lock();
+        let control_block = {
+            let mut lock = TASKS.lock();
 
-            let mut process = lock.get(0).unwrap().write();
-            let thread = process.thread_mut(0).unwrap();
+            // Push back the task we currently are executing
+            if let Some(task) = self.current_task.take() {
+                // TODO(patrik): Check if the task is runnable
+                lock.push_back(task);
+            }
 
-            thread.set_state(ThreadState::Running);
+            let task = lock.pop_front()
+                .expect("Failed to pop_front");
 
-            let control_block = thread.control_block();
-            println!("Picking next: {}", process.name());
+            self.current_task = Some(task.clone());
 
-            (control_block, process.pid())
+            let task = task.read();
+
+            // TODO(patrik): Set task state to running
+
+            let control_block = task.control_block();
+            println!("Picking next: {}", task.name());
+
+            control_block
         };
 
-        self.current_pid = pid;
-        switch_to_kernel_thread(&control_block);
+        // TODO(patrik): Check Task::flags to see if we should switch to
+        // kernel or userspace
+        switch_to_kernel(&control_block);
     }
 
-    fn replace_process_image(&mut self, elf: &Elf) -> ! {
-        let process = self.current_process();
-        let mut lock = process.write();
-        let main_thread = lock.thread_mut(0)
-            .expect("Failed to retrive main thread");
-
-        // TODO(patrik): If we replace a kernel thread then we need to
-        // free the stack
-        main_thread.reset();
-        main_thread.control_block.rip = elf.entry();
-
-        for program_header in elf.program_headers() {
-            if program_header.typ() == ProgramHeaderType::Load {
-                println!("Load: {:#x?}", program_header);
-                assert!(program_header.alignment() == 0x1000);
-
-                let data = elf.program_data(&program_header);
-                let size = program_header.memory_size() as usize;
-                mm::map_in_userspace(program_header.vaddr(), size)
-                    .expect("Failed to map in userspace");
-
-                let source = data.as_ptr();
-                let dest = program_header.vaddr().0 as *mut u8;
-                let count = size;
-                unsafe {
-                    core::ptr::copy_nonoverlapping(source, dest, count);
-                }
-            }
-        }
-
-        let stack_start = VirtualAddress(0x0000700000000000);
-        let stack_size = PAGE_SIZE * 4;
-        mm::map_in_userspace(stack_start, stack_size)
-            .expect("Failed to map in stack");
-
-        unsafe {
-            core::ptr::write_bytes(stack_start.0 as *mut u8, 0, stack_size);
-        }
-
-        main_thread.control_block.rsp = (stack_start.0 + stack_size) as u64;
-
-        core::mem::drop(lock);
-        core::mem::drop(process);
-
-        unsafe {
-            core!().scheduler().exec();
-        }
-    }
-
-    unsafe fn exec(&mut self) -> ! {
+    pub unsafe fn exec(&mut self) -> ! {
         let control_block = {
-            let process = self.current_process();
-            let result = process.read().thread(0).unwrap().control_block();
+            let task = self.current_task();
+            let control_block = task.read().control_block();
 
-            result
+            control_block
         };
 
         println!("Switching to userspace");
@@ -112,45 +76,27 @@ impl Scheduler {
         panic!("Failed to switch to userspace");
     }
 
-    pub fn current_process(&mut self) -> Arc<RwLock<Process>> {
-        let lock = PROCESSES.lock();
-
-        for process in lock.iter() {
-            if process.read().pid() == self.current_pid {
-                return process.clone();
-            }
-        }
-
-        panic!("No process with pid: {}", self.current_pid);
+    pub fn current_task(&mut self) -> Arc<RwLock<Task>> {
+        // TODO(patrik): Remove 'unwrap'
+        self.current_task.as_ref().unwrap().clone()
     }
 
-    pub fn add_process(process: Process) {
-        PROCESSES.lock().push(Arc::new(RwLock::new(process)));
+    pub fn add_task(task: Task) {
+        TASKS.lock().push_back(Arc::new(RwLock::new(task)));
     }
 
-    pub fn debug_dump_processes() {
-        let lock = PROCESSES.lock();
+    pub fn debug_dump_tasks() {
+        let lock = TASKS.lock();
 
         println!("----------------");
 
-        for process in lock.iter() {
-            let process = process.read();
-            println!("Process - {}:{}", process.pid(), process.name());
+        for task in lock.iter() {
+            let task = task.read();
+            println!("Task - {}:{}", task.pid(), task.name());
         }
 
         println!("----------------");
     }
-}
-
-pub fn replace_process_image(path: String) {
-    let (ptr, size) = crate::read_initrd_file(path)
-        .expect("Failed to find file");
-    let file = unsafe { core::slice::from_raw_parts(ptr, size) };
-
-    let elf = Elf::parse(&file)
-        .expect("Failed to parse file");
-
-    core!().scheduler().replace_process_image(&elf);
 }
 
 global_asm!(r#"
@@ -196,8 +142,8 @@ switch_to_userspace:
 
     iretq
 
-.global switch_to_kernel_thread
-switch_to_kernel_thread:
+.global switch_to_kernel
+switch_to_kernel:
     mov rsp, QWORD PTR [rdi + 0x80]
 
     mov r15, QWORD PTR [rdi + 0x00]

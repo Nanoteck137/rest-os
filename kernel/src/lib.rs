@@ -28,6 +28,7 @@ mod elf;
 use core::panic::PanicInfo;
 use core::alloc::Layout;
 use core::convert::TryInto;
+use core::sync::atomic::{ AtomicUsize, Ordering };
 use alloc::vec::Vec;
 use alloc::sync::Arc;
 use alloc::string::String;
@@ -39,7 +40,8 @@ use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::{ Allocator, BitmapFrameAllocator };
 use mm::{ BOOT_PHYSICAL_MEMORY, KERNEL_PHYSICAL_MEMORY };
 use multiboot::{ Multiboot, Tag};
-use process::{ Thread, Process };
+// use process::{ Thread, Process };
+use process::Task;
 use scheduler::Scheduler;
 use cpio::CPIO;
 use elf::{ Elf, ProgramHeaderType };
@@ -239,11 +241,11 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     use alloc::borrow::ToOwned;
 
-    let process = Process::create_kernel_process("Kernel Init".to_owned(),
-                                                 kernel_init_thread);
+    let task = Task::create_kernel_task("Kernel Init".to_owned(),
+                                        kernel_init_thread);
 
-    Scheduler::add_process(process);
-    Scheduler::debug_dump_processes();
+    Scheduler::add_task(task);
+    Scheduler::debug_dump_tasks();
 
     unsafe {
         core!().scheduler().next();
@@ -263,9 +265,7 @@ fn kernel_init_thread() {
     // let file = fs::open("/init");
     // let data = fs::read(file);
 
-    scheduler::replace_process_image(String::from("init"));
-
-    loop {}
+    process::replace_image_exec(String::from("init"));
 }
 
 #[panic_handler]

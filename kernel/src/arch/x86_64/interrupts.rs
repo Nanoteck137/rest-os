@@ -96,6 +96,15 @@ unsafe extern fn interrupt_handler(number: u8,
                                    error: u64,
                                    regs: &mut Regs)
 {
+    // println!("Frame: {:#x?}", frame);
+
+    // Check if we came from userspace if so swap the gs base
+    if frame.cs & 0b11 == 0b11 {
+        asm!("swapgs");
+    }
+
+    let _guard = core!().enter_interrupt();
+
     if number < 32 {
         match number {
             14 => {
@@ -129,6 +138,11 @@ unsafe extern fn interrupt_handler(number: u8,
         }
 
         super::pic::send_eoi(number);
+    }
+
+    // Check if we came from userspace if so swap back to the user gs
+    if frame.cs & 0b11 == 0b11 {
+        asm!("swapgs");
     }
 }
 

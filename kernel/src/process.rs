@@ -3,7 +3,9 @@
 use crate::arch::x86_64::Regs;
 use crate::elf::{ Elf, ProgramHeaderType };
 use crate::mm;
-use crate::mm::PAGE_SIZE;
+use crate::mm::{ VirtualAddress, PAGE_SIZE };
+
+use bitflags::bitflags;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -21,74 +23,88 @@ fn next_pid() -> usize {
     NEXT_PID.fetch_add(1, Ordering::SeqCst)
 }
 
-#[derive(Debug)]
-pub struct Process {
-    name: String,
-    pid: usize,
-
-    kernel: bool,
-
-    threads: Vec<Thread>,
+bitflags! {
+    struct TaskFlags: u32 {
+        const KERNEL = 0b00000001;
+    }
 }
 
-impl Process {
-    pub fn create_idle_process() -> Self {
-        let stack = mm::allocate_kernel_vm_zero("Idle Thread Stack".to_owned(),
-                                                PAGE_SIZE)
-            .expect("Failed to allocate stack for idle thread");
-        let stack = unsafe {
-            core::slice::from_raw_parts(stack.0 as *const u8,
-                                        PAGE_SIZE)
-        };
+#[derive(Copy, Clone, Default, Debug)]
+#[repr(C, packed)]
+pub struct ControlBlock {
+    pub regs: Regs,
+    pub rip: u64,
+    pub rsp: u64,
+}
 
-        let thread = Thread::create_kernel_thread("Idle Thread".to_owned(),
-                                                  idle_thread, stack);
-        let mut threads = Vec::new();
-        threads.push(thread);
+#[derive(Debug)]
+pub struct Task {
+    name: String,
+    flags: TaskFlags,
+    pid: usize,
 
-        Self {
-            name: "Idle Process".to_owned(),
-            pid: 0,
+    control_block: ControlBlock,
+}
 
-            kernel: true,
-            threads,
-        }
-    }
+impl Task {
+    pub fn create_kernel_task(name: String, entry: fn()) -> Self {
+        let stack_size = PAGE_SIZE * 2;
+        let stack = mm::allocate_kernel_vm_zero(format!("{}: Stack", name),
+                                                stack_size)
+            .expect("Failed to allocate kernel task stack");
 
-    pub fn create_kernel_process(name: String, entry: fn()) -> Self
-    {
-        let stack =
-            if let Some(addr) =
-                mm::allocate_kernel_vm_zero(format!("'{}': Stack", name),
-                                            PAGE_SIZE)
-        {
-            addr
-        } else {
-            panic!("Failed to allocate stack memory for: {}", name);
-        };
-
-        let stack = unsafe {
-            core::slice::from_raw_parts(stack.0 as *const u8,
-                                        PAGE_SIZE)
-        };
-
-        let thread =
-            Thread::create_kernel_thread(format!("'{}': Main Thread", name),
-                                         entry, stack);
-
-        let mut threads = Vec::new();
-        threads.push(thread);
-
+        let flags = TaskFlags::KERNEL;
         let pid = next_pid();
+
+        let mut control_block = ControlBlock::default();
+        control_block.rip = entry as u64;
+        control_block.rsp = (stack.0 + stack_size) as u64;
 
         Self {
             name,
+            flags,
             pid,
-
-            kernel: true,
-
-            threads
+            control_block,
         }
+    }
+
+    pub fn replace_image(&mut self, elf: &Elf) {
+        // Reset the control block
+        self.control_block = ControlBlock::default();
+
+        // Load the program headers
+        for program_header in elf.program_headers() {
+            if program_header.typ() == ProgramHeaderType::Load {
+                println!("Load: {:#x?}", program_header);
+                assert!(program_header.alignment() == 0x1000);
+
+                let data = elf.program_data(&program_header);
+                let size = program_header.memory_size() as usize;
+                mm::map_in_userspace(program_header.vaddr(), size)
+                    .expect("Failed to map in userspace");
+
+                let source = data.as_ptr();
+                let dest = program_header.vaddr().0 as *mut u8;
+                let count = size;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(source, dest, count);
+                }
+            }
+        }
+
+        let stack_start = VirtualAddress(0x0000700000000000);
+        let stack_size = PAGE_SIZE * 4;
+        mm::map_in_userspace(stack_start, stack_size)
+            .expect("Failed to map in stack");
+
+        unsafe {
+            core::ptr::write_bytes(stack_start.0 as *mut u8, 0, stack_size);
+        }
+
+        // Set the rsp register to the stack we allocated
+        self.control_block.rsp = (stack_start.0 + stack_size) as u64;
+        // Set the rip register to the elf entry
+        self.control_block.rip = elf.entry();
     }
 
     pub fn name(&self) -> &String {
@@ -99,77 +115,30 @@ impl Process {
         self.pid
     }
 
-    pub fn kernel(&self) -> bool {
-        self.kernel
-    }
-
-    pub fn set_kernel(&mut self, value: bool) {
-        self.kernel = value;
-    }
-
-    pub fn thread(&self, i: usize) -> Option<&Thread> {
-        self.threads.get(i)
-    }
-
-    pub fn thread_mut(&mut self, i: usize) -> Option<&mut Thread> {
-        self.threads.get_mut(i)
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ThreadState {
-    Ready,
-    Stopped,
-    Running,
-    Done,
-}
-
-#[derive(Debug)]
-pub struct Thread {
-    name: String,
-    state: ThreadState,
-    pub control_block: ThreadControlBlock,
-}
-
-#[derive(Copy, Clone, Default, Debug)]
-#[repr(C, packed)]
-pub struct ThreadControlBlock {
-    pub regs: Regs,
-    pub rip: u64,
-    pub rsp: u64,
-}
-
-impl Thread {
-    pub fn create_kernel_thread(name: String, entry: fn(),
-                                   stack: &'static [u8])
-        -> Self
-    {
-        let control_block = ThreadControlBlock {
-            regs: Regs::default(),
-            rip: entry as u64,
-            rsp: stack.as_ptr() as u64 + stack.len() as u64,
-        };
-
-        Self {
-            name,
-            state: ThreadState::Ready,
-            control_block,
-        }
-    }
-
-    pub fn reset(&mut self) {
-        self.control_block = ThreadControlBlock::default();
-    }
-
-    pub fn state(&self) -> ThreadState {
-        self.state
-    }
-
-    pub fn set_state(&mut self, state: ThreadState) {
-        self.state = state;
-    }
-
-    pub fn control_block(&self) -> ThreadControlBlock {
+    pub fn control_block(&self) -> ControlBlock {
         self.control_block
     }
+}
+
+pub fn replace_image_exec(path: String) -> ! {
+    let (ptr, size) = crate::read_initrd_file(path)
+        .expect("Failed to find file");
+    let file = unsafe { core::slice::from_raw_parts(ptr, size) };
+
+    let elf = Elf::parse(&file)
+        .expect("Failed to parse file");
+
+    {
+        // Switch out the image for the current task
+        let task = core!().task();
+        let mut lock = task.write();
+        lock.replace_image(&elf);
+    }
+
+    unsafe {
+        // Execute the current task
+        core!().scheduler().exec();
+    }
+
+    panic!("Failed to execute Scheduler::exec, should not happened");
 }

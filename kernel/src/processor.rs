@@ -7,7 +7,9 @@ use crate::arch;
 use crate::arch::ArchInfo;
 use crate::arch::x86_64::PageTable;
 use crate::scheduler::Scheduler;
-use crate::process::Process;
+// use crate::process::Process;
+use crate::process::Task;
+use crate::util::{ AutoAtomicRef, AutoAtomicRefGuard };
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -25,7 +27,10 @@ pub struct ProcessorInfo {
     address: usize,
     syscall_stack: usize,
     syscall_saved_stack: usize,
+
     core_id: u32,
+
+    interrupt_depth: AutoAtomicRef,
 
     arch: ArchInfo,
 
@@ -55,8 +60,12 @@ impl ProcessorInfo {
         page_table
     }
 
-    pub fn process(&mut self) -> Arc<RwLock<Process>> {
-        self.scheduler.current_process()
+    pub fn task(&mut self) -> Arc<RwLock<Task>> {
+        self.scheduler.current_task()
+    }
+
+    pub fn enter_interrupt(&self) -> AutoAtomicRefGuard {
+        self.interrupt_depth.increment()
     }
 }
 
@@ -90,7 +99,10 @@ pub fn init(core_id: u32)
         address: addr.0,
         syscall_stack: stack_addr.0 + stack_size,
         syscall_saved_stack: 0,
+
         core_id,
+
+        interrupt_depth: AutoAtomicRef::new(0),
 
         arch: ArchInfo::new(),
 
@@ -105,8 +117,5 @@ pub fn init(core_id: u32)
 
         // We need to swapgs to have the kernel gs as the current gs
         asm!("swapgs");
-
-        let d = arch::x86_64::read_kernel_gs_base();
-        println!("D: {:#x}", d);
     }
 }
