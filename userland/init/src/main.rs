@@ -37,34 +37,56 @@ impl core::fmt::Write for Writer {
     }
 }
 
+static mut WRITER: Writer = Writer {};
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        _print_fmt(format_args!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)))
+}
+
+pub fn _print_fmt(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+
+    unsafe { WRITER.write_fmt(args).unwrap() };
+}
+
 #[no_mangle]
 fn _start() -> ! {
     use core::fmt::Write;
     let mut writer = Writer {};
 
-    write!(&mut writer, "Hello World: {}\n", 123);
+    println!("Hello World: {}", 123);
 
     let res = unsafe {
         let mut value = 0u64;
 
         let ptr = &mut value as *mut _;
         let addr = ptr as u64;
-        write!(&mut writer, "Ptr: {:?}\n", ptr);
+        println!("Ptr: {:?}", ptr);
 
-        write!(&mut writer, "Before: {:#x}\n", value);
+        println!("Before: {:#x}", value);
         let res = do_syscall(0x11, addr, 0, 0, 0);
-        write!(&mut writer, "After: {:#x}\n", value);
+        println!("After: {:#x}", value);
         KernelError::try_from(res)
             .expect("Unknown error code")
     };
 
-    write!(&mut writer, "Syscall Result: {:?}\n", res);
+    println!("Syscall Result: {:?}", res);
 
     loop {}
 }
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    println!("Userland Init Panic");
     loop {}
 }
 
