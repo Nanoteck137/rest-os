@@ -46,7 +46,7 @@ unsafe fn user_write<T>(user_addr: u64, value: T) -> Option<()> {
 fn syscall_handler(regs: &mut Regs) {
     let number = regs.rax;
     let arg0 = regs.rdi;
-    let arg1 = regs.rsi;
+    let _arg1 = regs.rsi;
     let _arg2 = regs.rdx;
     let _arg3 = regs.r10;
 

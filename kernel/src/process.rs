@@ -139,6 +139,4 @@ pub fn replace_image_exec(path: String) -> ! {
         // Execute the current task
         core!().scheduler().exec();
     }
-
-    panic!("Failed to execute Scheduler::exec, should not happened");
 }
