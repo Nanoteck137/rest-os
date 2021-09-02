@@ -60,9 +60,6 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 
 #[no_mangle]
 fn _start() -> ! {
-    use core::fmt::Write;
-    let mut writer = Writer {};
-
     println!("Hello World: {}", 123);
 
     let res = unsafe {
