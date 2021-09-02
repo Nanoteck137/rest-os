@@ -15,3 +15,11 @@ pub fn initialize() {
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
     x86_64::debug_print_fmt(args);
 }
+
+pub unsafe fn force_enable_interrupts() {
+    x86_64::force_enable_interrupts();
+}
+
+pub unsafe fn force_disable_interrupts() {
+    x86_64::force_disable_interrupts();
+}

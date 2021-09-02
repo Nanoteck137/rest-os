@@ -48,6 +48,55 @@ use elf::{ Elf, ProgramHeaderType };
 
 use arch::x86_64::{ PageTable, PageType };
 
+trait Device {
+    fn ioctl(&mut self, request: usize, arg0: usize, arg1: usize);
+    fn write(&mut self, buffer: VirtualAddress, size: usize);
+}
+
+struct SerialDevice {
+    ioctl_count: usize,
+}
+
+impl SerialDevice {
+}
+
+impl Device for SerialDevice {
+    fn ioctl(&mut self, request: usize, arg0: usize, arg1: usize) {
+        match request {
+            0x01 => {
+                let ptr = arg0 as *mut usize;
+                unsafe {
+                    core::ptr::write(ptr, 0x1337);
+                }
+            },
+
+            _ => panic!("Bad request"),
+        }
+    }
+
+    fn write(&mut self, buffer: VirtualAddress, size: usize) {
+        let buffer = unsafe {
+            core::slice::from_raw_parts(buffer.0 as *const u8, size)
+        };
+
+        for b in buffer {
+            print!("{}", *b as char);
+        }
+    }
+}
+
+struct DummyDevice;
+
+impl Device for DummyDevice {
+    fn ioctl(&mut self, _request: usize, _arg0: usize, _arg1: usize) {
+        println!("Dummy Device IOCTL");
+    }
+
+    fn write(&mut self, _buffer: VirtualAddress, _size: usize) {
+        println!("Dummy Device WRITE");
+    }
+}
+
 macro_rules! version {
     () => (env!("CARGO_PKG_VERSION"))
 }
@@ -223,6 +272,16 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     arch::initialize();
 
+    arch::x86_64::pic::enable(0x0001);
+
+    unsafe {
+        core!().enable_interrupts();
+    }
+
+    core!().without_interrupts(|| {
+        println!("Interrupts: {}", core!().is_interrupts_enabled());
+    });
+
     multiboot.modules(|m| {
         let data = unsafe { m.data(&KERNEL_PHYSICAL_MEMORY) };
 
@@ -260,7 +319,50 @@ fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
     // println!("Current Process: {:#x?}", core!().process());
 
-    arch::x86_64::pic::enable(0x0001);
+    println!("Current Task: {:#x?}", core!().task());
+
+    use alloc::boxed::Box;
+    use alloc::collections::BTreeMap;
+
+    let serial_device = SerialDevice {
+        ioctl_count: 0,
+    };
+
+    let dummy_device = DummyDevice {};
+
+    let mut devices: BTreeMap<String, RwLock<Box<dyn Device>>> = BTreeMap::new();
+
+    let mut register_device = |name, device| {
+        devices.insert(name, RwLock::new(device));
+    };
+
+    register_device(String::from("serial_device_00"), Box::new(serial_device));
+    register_device(String::from("dummy_device"), Box::new(dummy_device));
+
+    for (name, mut device) in &devices {
+        println!("Device: {}", name);
+        let str = "Hello World from device\n";
+
+        let addr = VirtualAddress(str.as_ptr() as usize);
+        device.write().write(addr, str.len());
+    }
+
+    {
+        let find_device = |name| {
+            if !devices.contains_key(name) {
+                return None;
+            }
+
+            return devices.get(name);
+        };
+
+        let serial = find_device("serial_device_00")
+            .expect("Failed to find serial device");
+
+        let str = "Found the serial device printing";
+        let addr = VirtualAddress(str.as_ptr() as usize);
+        serial.write().write(addr, str.len());
+    }
 
     // let file = fs::open("/init");
     // let data = fs::read(file);

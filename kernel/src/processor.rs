@@ -15,6 +15,8 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use spin::RwLock;
 
+use core::sync::atomic::{ AtomicUsize, Ordering };
+
 #[macro_export]
 macro_rules! core {
     () => {
@@ -31,6 +33,7 @@ pub struct ProcessorInfo {
     core_id: u32,
 
     interrupt_depth: AutoAtomicRef,
+    interrupt_disable_ref: AtomicUsize,
 
     arch: ArchInfo,
 
@@ -64,8 +67,44 @@ impl ProcessorInfo {
         self.scheduler.current_task()
     }
 
-    pub fn enter_interrupt(&self) -> AutoAtomicRefGuard {
+    pub unsafe fn enter_interrupt(&self) -> AutoAtomicRefGuard {
         self.interrupt_depth.increment()
+    }
+
+    pub unsafe fn enable_interrupts(&self) {
+        let value = self.interrupt_disable_ref.fetch_sub(1, Ordering::SeqCst);
+        value.checked_sub(1)
+            .expect("core!().enable_interrupts(): interrupt disable \
+                     reference has underflowed");
+
+        if value == 1 {
+            arch::force_enable_interrupts();
+        }
+    }
+
+    pub unsafe fn disable_interrupts(&self) {
+        let value = self.interrupt_disable_ref.fetch_add(1, Ordering::SeqCst);
+        value.checked_add(1)
+            .expect("core!().enable_interrupts(): interrupt enable reference \
+                    has overflowed");
+
+        arch::force_disable_interrupts();
+    }
+
+    pub fn without_interrupts<F>(&self, func: F)
+        where F: FnOnce()
+    {
+        unsafe { self.disable_interrupts() };
+
+        func();
+
+        unsafe { self.enable_interrupts() };
+    }
+
+    pub fn is_interrupts_enabled(&self) -> bool {
+        let flags = unsafe { arch::x86_64::read_flags() };
+
+        flags & 0x200 == 0x200
     }
 }
 
@@ -103,6 +142,11 @@ pub fn init(core_id: u32)
         core_id,
 
         interrupt_depth: AutoAtomicRef::new(0),
+        // NOTE(patrik): The 'interrupt_disable_ref' is initialized with 1
+        // because when booting the interrupts are already disabled to
+        // one reference is needed when re-enabling the interrupts after
+        // kernel initialization
+        interrupt_disable_ref: AtomicUsize::new(1),
 
         arch: ArchInfo::new(),
 

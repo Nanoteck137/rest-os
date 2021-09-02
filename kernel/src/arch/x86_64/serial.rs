@@ -1,5 +1,7 @@
 use spin::Mutex;
 
+use core::sync::atomic::{ AtomicBool, Ordering };
+
 use super::{ out8, in8 };
 
 pub(super) struct SerialPort {
@@ -48,22 +50,42 @@ impl core::fmt::Write for SerialPort {
 }
 
 pub(super) static SERIAL_PORT: Mutex<Option<SerialPort>> = Mutex::new(None);
+pub(super) static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-pub fn initialize() {
+pub(super) fn initialize() {
     {
         *SERIAL_PORT.lock() = Some(SerialPort::new(0x3f8));
     }
 }
 
+pub(super) fn set_initialized() {
+    INITIALIZED.store(true, Ordering::SeqCst);
+}
+
 pub fn print_fmt(args: core::fmt::Arguments) {
     use core::fmt::Write;
 
-    let mut lock = SERIAL_PORT.lock();
-    match lock.as_mut() {
-        Some(f) => {
-            f.write_fmt(args).unwrap();
-        }
-        None => {
+    let initialized = INITIALIZED.load(Ordering::SeqCst);
+
+    if initialized {
+        core!().without_interrupts(|| {
+            let mut lock = SERIAL_PORT.lock();
+            match lock.as_mut() {
+                Some(f) => {
+                    f.write_fmt(args).unwrap();
+                }
+                None => {
+                }
+            }
+        });
+    } else {
+        let mut lock = SERIAL_PORT.lock();
+        match lock.as_mut() {
+            Some(f) => {
+                f.write_fmt(args).unwrap();
+            }
+            None => {
+            }
         }
     }
 }

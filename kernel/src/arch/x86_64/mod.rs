@@ -90,6 +90,13 @@ pub unsafe fn write_cr3(value: u64) {
     asm!("mov cr3, rax", in("rax") value);
 }
 
+pub unsafe fn read_flags() -> u64 {
+    let value: u64;
+    asm!("pushfq
+          pop {}", out(reg) value);
+    value
+}
+
 pub unsafe fn rdmsr(msr: u32) -> u64 {
     let value_low: u32;
     let value_high: u32;
@@ -135,6 +142,14 @@ pub unsafe fn write_kernel_gs_base(base: u64) {
     wrmsr(MSR_KERNEL_GS_BASE, base)
 }
 
+pub unsafe fn force_enable_interrupts() {
+    asm!("sti");
+}
+
+pub unsafe fn force_disable_interrupts() {
+    asm!("cli");
+}
+
 pub fn early_initialize() {
     serial::initialize();
     pic::initialize();
@@ -144,6 +159,8 @@ pub fn initialize() {
     gdt::initialize();
     interrupts::initialize();
     syscall::initialize();
+
+    serial::set_initialized();
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
