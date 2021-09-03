@@ -2,7 +2,7 @@
 //! this is where the boot code is gonna call into.
 
 #![feature(panic_info_message, const_mut_refs, alloc_error_handler)]
-#![feature(asm, global_asm, get_mut_unchecked)]
+#![feature(asm, global_asm, get_mut_unchecked, const_btree_new)]
 #![no_std]
 
 // TODO(patrik): Temporary
@@ -48,7 +48,7 @@ use elf::{ Elf, ProgramHeaderType };
 
 use arch::x86_64::{ PageTable, PageType };
 
-trait Device {
+pub trait Device: Sync + Send {
     fn ioctl(&mut self, request: usize, arg0: usize, arg1: usize);
     fn write(&mut self, buffer: VirtualAddress, size: usize);
 }
@@ -270,6 +270,25 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     mm::initialize(PhysicalAddress(multiboot_addr));
     processor::init(0);
 
+    let serial_device = SerialDevice {
+        ioctl_count: 0,
+    };
+
+    let dummy_device = DummyDevice {};
+
+    /*
+    let mut register_device = |name, device| {
+        devices.insert(name, RwLock::new(device));
+    };
+    */
+
+    register_device(String::from("serial_device_00"), Box::new(serial_device));
+    register_device(String::from("dummy_device"), Box::new(dummy_device));
+
+    print::switch_early_print();
+    print::console_init();
+    print::flush_early_print_buffer();
+
     arch::initialize();
 
     arch::x86_64::pic::enable(0x0001);
@@ -313,6 +332,30 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     panic!("Should not be here!!!");
 }
 
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+
+type DeviceLock = Arc<Mutex<RwLock<Box<dyn Device>>>>;
+static DEVICES: Mutex<RwLock<BTreeMap<String, DeviceLock>>> =
+    Mutex::new(RwLock::new(BTreeMap::new()));
+
+pub fn register_device(name: String, device: Box<dyn Device>) {
+    let lock = DEVICES.lock();
+    let mut lock = lock.write();
+
+    lock.insert(name, Arc::new(Mutex::new(RwLock::new(device))));
+}
+
+pub fn find_device(name: &str) -> Option<DeviceLock> {
+    let lock = DEVICES.lock();
+
+    if let Some(device) = lock.read().get(name) {
+        return Some(device.clone());
+    }
+
+    None
+}
+
 fn kernel_init_thread() {
     // TODO(patrik): Here we can release the stack we used from the bootloader.
 
@@ -324,21 +367,7 @@ fn kernel_init_thread() {
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
 
-    let serial_device = SerialDevice {
-        ioctl_count: 0,
-    };
-
-    let dummy_device = DummyDevice {};
-
-    let mut devices: BTreeMap<String, RwLock<Box<dyn Device>>> = BTreeMap::new();
-
-    let mut register_device = |name, device| {
-        devices.insert(name, RwLock::new(device));
-    };
-
-    register_device(String::from("serial_device_00"), Box::new(serial_device));
-    register_device(String::from("dummy_device"), Box::new(dummy_device));
-
+    /*
     for (name, mut device) in &devices {
         println!("Device: {}", name);
         let str = "Hello World from device\n";
@@ -346,8 +375,10 @@ fn kernel_init_thread() {
         let addr = VirtualAddress(str.as_ptr() as usize);
         device.write().write(addr, str.len());
     }
+    */
 
     {
+        /*
         let find_device = |name| {
             if !devices.contains_key(name) {
                 return None;
@@ -355,13 +386,19 @@ fn kernel_init_thread() {
 
             return devices.get(name);
         };
+        */
 
         let serial = find_device("serial_device_00")
             .expect("Failed to find serial device");
 
+        println!("Count: {}", Arc::strong_count(&serial));
+
+        let lock = serial.lock();
+        let mut lock = lock.write();
+
         let str = "Found the serial device printing";
         let addr = VirtualAddress(str.as_ptr() as usize);
-        serial.write().write(addr, str.len());
+        lock.write(addr, str.len());
     }
 
     // let file = fs::open("/init");
@@ -372,6 +409,10 @@ fn kernel_init_thread() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    unsafe {
+        arch::force_disable_interrupts();
+    }
+
     println!("---------------- KERNEL PANIC ----------------");
     // Print out the location of the panic
     if let Some(loc) = info.location() {

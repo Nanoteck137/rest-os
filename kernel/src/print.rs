@@ -6,6 +6,7 @@
 //! the display
 
 use crate::arch;
+use crate::mm::{ VirtualAddress, PAGE_SIZE };
 
 #[macro_export]
 macro_rules! print {
@@ -35,6 +36,83 @@ macro_rules! eprintln {
     ($($arg:tt)*) => ($crate::eprint!("{}\n", format_args!($($arg)*)))
 }
 
+const EARLY_PRINT_BUFFER_SIZE: usize = 2 * PAGE_SIZE;
+
+struct EarlyPrintBuffer {
+    len: usize,
+    buffer: [u8; EARLY_PRINT_BUFFER_SIZE],
+}
+
+static mut EARLY_PRINT_BUFFER: EarlyPrintBuffer = EarlyPrintBuffer {
+    len: 0,
+    buffer: [0; EARLY_PRINT_BUFFER_SIZE],
+};
+
+impl core::fmt::Write for EarlyPrintBuffer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for b in s.bytes() {
+            if self.len >= self.buffer.len() {
+                // TODO(patrik): How should this be handled?
+                break;
+            }
+
+            self.buffer[self.len] = b;
+            self.len += 1;
+        }
+
+        Ok(())
+    }
+}
+
+static mut USE_EARLY_PRINTING: bool = true;
+static mut CONSOLE: Option<crate::DeviceLock> = None;
+
+pub fn switch_early_print() {
+    unsafe {
+        USE_EARLY_PRINTING = false;
+    }
+}
+
+pub fn flush_early_print_buffer() {
+    let console = unsafe {
+        (&CONSOLE).as_ref().unwrap().clone()
+    };
+
+    let lock = console.lock();
+    let mut lock = lock.write();
+
+    let (addr, len) = unsafe {
+        let addr = EARLY_PRINT_BUFFER.buffer.as_ptr() as usize;
+        let len = EARLY_PRINT_BUFFER.len;
+        (VirtualAddress(addr), len)
+    };
+
+    lock.write(addr, len);
+}
+
+pub fn console_init() {
+    let device = crate::find_device("serial_device_00");
+    unsafe {
+        CONSOLE = device;
+    }
+}
+
 pub fn _print_fmt(args: core::fmt::Arguments) {
-    arch::debug_print_fmt(args);
+    use core::fmt::Write;
+
+    // TODO(patrik): Print to a side buffer when early printing then switch
+    // to printing to a console device
+
+    // TODO(patrik): Implement printing to temporary early buffer
+    // TODO(patrik): Print to console device when early printing is out
+
+    if unsafe { USE_EARLY_PRINTING } {
+        // NOTE(patrik): We can use static mutable here because we know that
+        // only one core is gonna access it
+        unsafe {
+            let _ = EARLY_PRINT_BUFFER.write_fmt(args);
+        }
+    } else {
+        arch::debug_print_fmt(args);
+    }
 }
