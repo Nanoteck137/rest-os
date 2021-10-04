@@ -5,6 +5,23 @@
 #![feature(asm, global_asm, get_mut_unchecked, const_btree_new)]
 #![no_std]
 
+/// TODO(patrik):
+///   - Processes
+///     - Standard System calls
+///   - File System
+///     - Virtual File System
+///     - FAT32 File System
+///   - Device Handling
+///     - AHCI
+///     - How should the OS handle devices
+///       - USB Devices
+///       - PCI Devices
+///   - Arch
+///     - Add Arm64 support?
+///   - Bugs
+///     - When a panic happens the interrupts from the PIC timer is still
+///       firing
+
 // TODO(patrik): Temporary
 #![allow(dead_code, unused_imports)]
 
