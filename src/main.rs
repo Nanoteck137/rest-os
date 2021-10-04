@@ -5,6 +5,17 @@ use std::process::Command;
 
 use std::path::{ Path, PathBuf };
 
+fn linker() -> String {
+    let cross = match std::env::var("CROSS") {
+        Ok(c) => c,
+        Err(_) => "".to_string(),
+    };
+
+    let linker = format!("{}ld", cross);
+
+    linker
+}
+
 fn target_dir(components: &[&str]) -> PathBuf {
     let mut result = PathBuf::new();
     result.push("target");
@@ -81,13 +92,18 @@ fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P)
     let project_path = project_path.as_ref();
     let target_path = target_path.as_ref().canonicalize().ok()?;
     println!("Building rust: {:?} -> {:?}", project_path, target_path);
-    let status = Command::new("cargo")
-        .current_dir(project_path)
-        .arg("build")
-        .arg("--target-dir")
-        .arg(target_path)
-        .status()
-            .expect("Unknown error when running 'cargo'");
+
+    let linker = linker();
+
+    let status =
+        Command::new("cargo")
+            .current_dir(project_path)
+            .env("RUSTFLAGS", format!("-C linker={}", linker))
+            .arg("build")
+            .arg("--target-dir")
+            .arg(target_path)
+            .status()
+                .expect("Unknown error when running 'cargo'");
 
     if !status.success() {
         return None;
@@ -179,8 +195,10 @@ fn main() {
     build_kernel_asm_files().expect("Failed to build the assembly files");
     build_rust_projects().expect("Failed to build the rust projects");
 
+    let linker = linker();
+
     let target = target_dir(&["kernel.elf"]);
-    let output = Command::new("x86_64-elf-ld")
+    let output = Command::new(linker)
         .arg("-n")
         .arg("-T")
         .arg("kernel/src/arch/x86_64/linker.ld")
