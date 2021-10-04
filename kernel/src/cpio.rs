@@ -7,7 +7,7 @@ use crate::util::align_up;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum CPIOKind {
     Binary,
     Odc,
@@ -107,6 +107,8 @@ impl<'a> CPIO<'a> {
             core::slice::from_raw_parts(data_addr.0 as *const u8, data_size)
         };
 
+        assert!(kind != CPIOKind::Binary, "Fix binary format parsing");
+
         Self {
             data,
             kind
@@ -120,41 +122,29 @@ impl<'a> CPIO<'a> {
             let (info, header_size) = CPIOInfo::parse(data, self.kind)?;
             start += header_size;
 
-            /*
-            let header_ptr = .as_ptr() as *const CPIOHeader;
-            let header = core::ptr::read(header_ptr);
-            start += core::mem::size_of::<CPIOHeader>();
-            */
-
             let file_size = info.file_size;
-            // NOTE(patrik): -1 for the null byte
             let name_size = info.name_size;
 
             let name_bytes = &self.data[start..start + name_size];
-            let name =
-                core::str::from_utf8(&name_bytes[..name_size - 1])
-                    .expect("Failed to convert the name for the file");
+            let name = core::str::from_utf8(&name_bytes[..name_size - 1])
+                .expect("Failed to convert the name for the file");
 
             start += name_size;
             start += pad_to_4(header_size + name_size);
 
-            // println!("Name: {} Offset: {:#x}", info.name_size, start);
-            // println!("Name: {} Offset: {:#x}", off, start);
-
-            /*
-            if name_size % 2 == 0 {
-                // Namesize is even
-                start += name_size + 1;
+            let correct_path = if name.starts_with("./") {
+                if name[2..] == path {
+                    true
+                } else {
+                    false
+                }
+            } else if name == path {
+                true
             } else {
-                // Namesize is odd
-                // NOTE(patrik): if the namesize is odd then their is a extra
-                // null byte in the name that we need to skip over
-                start += name_size + 2;
-            }
-            */
+                false
+            };
 
-            if name == path {
-                println!("Test: {:x?}", &self.data[start..start+3]);
+            if correct_path {
                 return Some(&self.data[start..start + file_size]);
             }
 
@@ -164,14 +154,6 @@ impl<'a> CPIO<'a> {
 
             start += file_size;
             start += pad_to_4(file_size);
-
-            /*
-            if file_size % 2 == 0 {
-                start += file_size;
-            } else {
-                start += file_size + 1;
-            }
-            */
         }
     }
 }

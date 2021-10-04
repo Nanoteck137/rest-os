@@ -419,7 +419,7 @@ fn kernel_init_thread() {
     // let file = fs::open("/init");
     // let data = fs::read(file);
 
-    process::replace_image_exec(String::from("./init"));
+    process::replace_image_exec(String::from("init"));
 }
 
 #[panic_handler]
