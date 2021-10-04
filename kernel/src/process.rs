@@ -76,7 +76,7 @@ impl Task {
         for program_header in elf.program_headers() {
             if program_header.typ() == ProgramHeaderType::Load {
                 println!("Load: {:#x?}", program_header);
-                assert!(program_header.alignment() == 0x1000);
+                // assert!(program_header.alignment() == 0x1000);
 
                 let data = elf.program_data(&program_header);
                 let size = program_header.memory_size() as usize;

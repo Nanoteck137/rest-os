@@ -180,7 +180,7 @@ fn main() {
     build_rust_projects().expect("Failed to build the rust projects");
 
     let target = target_dir(&["kernel.elf"]);
-    let output = Command::new("ld")
+    let output = Command::new("x86_64-elf-ld")
         .arg("-n")
         .arg("-T")
         .arg("kernel/src/arch/x86_64/linker.ld")

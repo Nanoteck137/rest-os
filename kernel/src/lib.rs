@@ -43,7 +43,7 @@ use multiboot::{ Multiboot, Tag};
 // use process::{ Thread, Process };
 use process::Task;
 use scheduler::Scheduler;
-use cpio::CPIO;
+use cpio::{ CPIO, CPIOKind };
 use elf::{ Elf, ProgramHeaderType };
 
 use arch::x86_64::{ PageTable, PageType };
@@ -257,7 +257,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    // _display_multiboot_tags(&multiboot);
+    _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
@@ -302,18 +302,33 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
     });
 
     multiboot.modules(|m| {
+        println!("Module");
         let data = unsafe { m.data(&KERNEL_PHYSICAL_MEMORY) };
+
+        let addr = VirtualAddress(data.as_ptr() as usize);
+        let size = data.len();
 
         if u16::from_le_bytes(data[0..2].try_into().unwrap()) == 0o070707 {
             // Binary cpio
             println!("Binary cpio");
 
-            let addr = VirtualAddress(data.as_ptr() as usize);
-            let size = data.len();
-            let cpio = CPIO::binary(addr, size);
-            {
-                *CPIO.lock() = Some(cpio);
-            }
+            let cpio = CPIO::new(addr, size, CPIOKind::Binary);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070707" {
+            println!("Odc cpio");
+
+            let cpio = CPIO::new(addr, size, CPIOKind::Odc);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070701" {
+            println!("Newc cpio");
+
+            let cpio = CPIO::new(addr, size, CPIOKind::Newc);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070702" {
+            println!("Newc CRC cpio");
+
+            let cpio = CPIO::new(addr, size, CPIOKind::Crc);
+            *CPIO.lock() = Some(cpio);
         }
     });
 
@@ -396,7 +411,7 @@ fn kernel_init_thread() {
         let lock = serial.lock();
         let mut lock = lock.write();
 
-        let str = "Found the serial device printing";
+        let str = "Found the serial device printing\n";
         let addr = VirtualAddress(str.as_ptr() as usize);
         lock.write(addr, str.len());
     }
@@ -404,7 +419,7 @@ fn kernel_init_thread() {
     // let file = fs::open("/init");
     // let data = fs::read(file);
 
-    process::replace_image_exec(String::from("init"));
+    process::replace_image_exec(String::from("./init"));
 }
 
 #[panic_handler]
