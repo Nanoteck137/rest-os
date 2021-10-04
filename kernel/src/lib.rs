@@ -6,6 +6,13 @@
 #![no_std]
 
 /// TODO(patrik):
+///  Currenly working on:
+///   - Go through the code and fix all the locks so they behave
+///
+/// ---------------------------------------------------------------------------
+///
+///   - Go through the code and fix all the locks so they behave
+///     like they should with interrupts
 ///   - Processes
 ///     - Standard System calls
 ///   - File System
@@ -18,6 +25,7 @@
 ///       - PCI Devices
 ///   - Arch
 ///     - Add Arm64 support?
+///   - ACPI Parsing
 ///   - Bugs
 ///     - When a panic happens the interrupts from the PIC timer is still
 ///       firing
