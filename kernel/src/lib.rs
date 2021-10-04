@@ -25,6 +25,8 @@
 ///       - PCI Devices
 ///   - Arch
 ///     - Add Arm64 support?
+///     - Add support for APIC
+///       - Bring up more cores
 ///   - ACPI Parsing
 ///   - Bugs
 ///     - When a panic happens the interrupts from the PIC timer is still
