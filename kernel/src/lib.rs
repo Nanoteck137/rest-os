@@ -5,6 +5,9 @@
 #![feature(asm, global_asm, get_mut_unchecked, const_btree_new)]
 #![no_std]
 
+// TODO(patrik): Temporary
+#![allow(dead_code, unused_imports)]
+
 /// TODO(patrik):
 ///  Currenly working on:
 ///   - Go through the code and fix all the locks so they behave
@@ -31,9 +34,6 @@
 ///   - Bugs
 ///     - When a panic happens the interrupts from the PIC timer is still
 ///       firing
-
-// TODO(patrik): Temporary
-#![allow(dead_code, unused_imports)]
 
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
@@ -452,6 +452,7 @@ fn kernel_init_thread() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
+        arch::x86_64::pic::disable();
         arch::force_disable_interrupts();
     }
 
