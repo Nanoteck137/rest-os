@@ -23,3 +23,7 @@ pub unsafe fn force_enable_interrupts() {
 pub unsafe fn force_disable_interrupts() {
     x86_64::force_disable_interrupts();
 }
+
+pub fn is_interrupts_enabled() -> bool {
+    x86_64::is_interrupts_enabled()
+}

@@ -102,9 +102,7 @@ impl ProcessorInfo {
     }
 
     pub fn is_interrupts_enabled(&self) -> bool {
-        let flags = unsafe { arch::x86_64::read_flags() };
-
-        flags & 0x200 == 0x200
+        arch::is_interrupts_enabled()
     }
 }
 

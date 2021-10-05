@@ -18,6 +18,13 @@
 ///     like they should with interrupts
 ///   - Processes
 ///     - Standard System calls
+///     - 'replace_image'
+///       - Change the stack start
+///       - Change the initial stack size
+///       - When we replace a kernel task then we need to figure out when
+///         and how to free up the stack but we need to be careful because the
+///         current executing thread chould be using the stack so that stack
+///         free need to be defered
 ///   - File System
 ///     - Virtual File System
 ///     - FAT32 File System
@@ -26,6 +33,10 @@
 ///     - How should the OS handle devices
 ///       - USB Devices
 ///       - PCI Devices
+///   - Memory Manager
+///     - Refactor the code
+///       - Make the page table copy the kernel table entries inside
+///         'page_fault_vmalloc'
 ///   - Arch
 ///     - Add Arm64 support?
 ///     - Add support for APIC
@@ -33,6 +44,14 @@
 ///   - ACPI Parsing
 ///   - Bugs
 ///
+
+macro_rules! verify_interrupts_disabled {
+    () => {{
+        use crate::arch;
+        assert!(!arch::is_interrupts_enabled(),
+                "verify_interrupts_disabled: failed");
+    }}
+}
 
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
@@ -283,7 +302,7 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    _display_multiboot_tags(&multiboot);
+    // _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);

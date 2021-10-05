@@ -151,6 +151,11 @@ impl MemoryManager {
     }
 
     fn new(multiboot_structure: PhysicalAddress) -> Self {
+        verify_interrupts_disabled!();
+
+        // TODO(patrik): We need to refactor this code
+        //  - Create a list of ranges for the memory map
+
         let multiboot = unsafe {
             Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY, multiboot_structure)
         };
@@ -173,6 +178,8 @@ impl MemoryManager {
     }
 
     fn initialize(&mut self) {
+        verify_interrupts_disabled!();
+
         // TODO(patrik): Initialize the reference page table
         //   - The reference page table is used to create new page table
         //     with the kernel mappings identical
@@ -244,6 +251,7 @@ impl MemoryManager {
     fn create_page_table(&mut self) -> PageTable {
         let page_table = PageTable::create(&mut self.frame_allocator);
 
+        // TODO(patrik): Let the page table handle the copying
         for i in 0..512 {
             unsafe {
                 let entry = self.reference_page_table
@@ -290,7 +298,6 @@ impl MemoryManager {
         -> Option<()>
     {
         let pages = size / PAGE_SIZE + 1;
-
 
         let page_table = &mut self.reference_page_table;
 
@@ -361,8 +368,9 @@ impl MemoryManager {
     fn get_current_page_table() -> PageTable {
         let cr3 = unsafe { arch::x86_64::read_cr3() };
 
-        let page_table =
-            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
+        let page_table = unsafe {
+            PageTable::from_table(PhysicalAddress(cr3 as usize))
+        };
 
         page_table
     }
@@ -376,6 +384,7 @@ impl MemoryManager {
             self.map_region(&mut region);
         }
 
+        // TODO(patrik): Let the page table handle the copying of the entries
         let page_table = Self::get_current_page_table();
 
         let (start_p4, _, _, _, _) = PageTable::index(VMALLOC_START);
@@ -410,7 +419,12 @@ impl MemoryManager {
 static MM: Mutex<Option<MemoryManager>> = Mutex::new(None);
 
 pub fn initialize(multiboot_structure: PhysicalAddress) {
-    *MM.lock() = Some(MemoryManager::new(multiboot_structure));
+    {
+        let mut lock = MM.lock();
+        assert!(lock.is_none(), "MM: Memory Manager already initialized");
+
+        *lock = Some(MemoryManager::new(multiboot_structure));
+    }
 }
 
 pub fn allocate_kernel_vm(name: String, size: usize) -> Option<VirtualAddress>

@@ -92,6 +92,8 @@ impl Task {
             }
         }
 
+        // TODO(patrik): Change the stack start
+        // TODO(patrik): What should the initial stack size be
         let stack_start = VirtualAddress(0x0000700000000000);
         let stack_size = PAGE_SIZE * 4;
         mm::map_in_userspace(stack_start, stack_size)

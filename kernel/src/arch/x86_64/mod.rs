@@ -150,6 +150,13 @@ pub unsafe fn force_disable_interrupts() {
     asm!("cli");
 }
 
+pub fn is_interrupts_enabled() -> bool {
+    let flags = unsafe { read_flags() };
+
+    // TODO(patirk): Move 0x200 to constant
+    flags & 0x200 == 0x200
+}
+
 pub fn early_initialize() {
     serial::initialize();
     pic::initialize();

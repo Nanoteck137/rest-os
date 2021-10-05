@@ -60,19 +60,21 @@ impl CPIOInfo {
                 };
 
                 let magic = parse_u16(&bytes[0..6])?;
-                let ino = parse_u32(&bytes[6..14])?;
-                let mode = parse_u32(&bytes[14..22])?;
-                let uid = parse_u32(&bytes[22..30])?;
-                let gid = parse_u32(&bytes[30..38])?;
-                let nlink = parse_u32(&bytes[38..46])?;
-                let mtime = parse_u32(&bytes[46..54])?;
+                assert!(magic == 0o070701);
+
+                let _ino = parse_u32(&bytes[6..14])?;
+                let _mode = parse_u32(&bytes[14..22])?;
+                let _uid = parse_u32(&bytes[22..30])?;
+                let _gid = parse_u32(&bytes[30..38])?;
+                let _nlink = parse_u32(&bytes[38..46])?;
+                let _mtime = parse_u32(&bytes[46..54])?;
                 let filesize = parse_u32(&bytes[54..62])?;
-                let devmajor = parse_u32(&bytes[62..70])?;
-                let devminor = parse_u32(&bytes[70..78])?;
-                let rdevmajor = parse_u32(&bytes[78..86])?;
-                let rdevminor = parse_u32(&bytes[86..94])?;
+                let _devmajor = parse_u32(&bytes[62..70])?;
+                let _devminor = parse_u32(&bytes[70..78])?;
+                let _rdevmajor = parse_u32(&bytes[78..86])?;
+                let _rdevminor = parse_u32(&bytes[86..94])?;
                 let namesize = parse_u32(&bytes[94..102])?;
-                let check = parse_u32(&bytes[102..110])?;
+                let _check = parse_u32(&bytes[102..110])?;
 
                 Some((CPIOInfo {
                     file_size: filesize as usize,
