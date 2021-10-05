@@ -32,8 +32,7 @@
 ///       - Bring up more cores
 ///   - ACPI Parsing
 ///   - Bugs
-///     - When a panic happens the interrupts from the PIC timer is still
-///       firing
+///
 
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
