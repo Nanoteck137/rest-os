@@ -142,10 +142,12 @@ pub unsafe fn write_kernel_gs_base(base: u64) {
     wrmsr(MSR_KERNEL_GS_BASE, base)
 }
 
+#[inline]
 pub unsafe fn force_enable_interrupts() {
     asm!("sti");
 }
 
+#[inline]
 pub unsafe fn force_disable_interrupts() {
     asm!("cli");
 }

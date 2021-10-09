@@ -72,33 +72,43 @@ impl ProcessorInfo {
     }
 
     pub unsafe fn enable_interrupts(&self) {
+        /*
         let value = self.interrupt_disable_ref.fetch_sub(1, Ordering::SeqCst);
         value.checked_sub(1)
             .expect("core!().enable_interrupts(): interrupt disable \
                      reference has underflowed");
 
         if value == 1 {
-            arch::force_enable_interrupts();
         }
+        */
+
+        arch::force_enable_interrupts();
     }
 
     pub unsafe fn disable_interrupts(&self) {
+        /*
         let value = self.interrupt_disable_ref.fetch_add(1, Ordering::SeqCst);
         value.checked_add(1)
             .expect("core!().enable_interrupts(): interrupt enable reference \
                     has overflowed");
 
+        */
         arch::force_disable_interrupts();
     }
 
-    pub fn without_interrupts<F>(&self, func: F)
-        where F: FnOnce()
+    pub fn without_interrupts<F, R>(&self, func: F) -> R
+        where F: FnOnce() -> R
     {
+        let were_enabled = self.is_interrupts_enabled();
         unsafe { self.disable_interrupts() };
 
-        func();
+        let result = func();
 
-        unsafe { self.enable_interrupts() };
+        if were_enabled {
+            unsafe { self.enable_interrupts() };
+        }
+
+        result
     }
 
     pub fn is_interrupts_enabled(&self) -> bool {

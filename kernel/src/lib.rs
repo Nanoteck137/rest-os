@@ -281,14 +281,11 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
 }
 
 fn kernel_test_task() {
-    loop {
-        println!("Kernel Task");
-        println!("Interrupts: {}", core!().is_interrupts_enabled());
-    }
+    loop {}
 }
 
 #[no_mangle]
-extern fn kernel_init(multiboot_addr: usize) -> ! {
+pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     arch::early_initialize();
 
     // Clear the display
@@ -398,13 +395,9 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     Scheduler::debug_dump_tasks();
 
-    core!().scheduler().set_ready();
-
     unsafe {
-        core!().scheduler().next();
+        core!().scheduler().force_next();
     }
-
-    panic!("Should not be here!!!");
 }
 
 use alloc::boxed::Box;
@@ -476,9 +469,10 @@ fn kernel_init_thread() {
         lock.write(addr, str.len());
     }
 
+    core!().scheduler().set_ready();
+
     // let file = fs::open("/init");
     // let data = fs::read(file);
-
     process::replace_image_exec(String::from("init"));
 }
 

@@ -7,6 +7,8 @@ use crate::mm;
 use crate::mm::VirtualAddress;
 use crate::scheduler::Scheduler;
 
+use crate::process::ControlBlock;
+
 use super::Regs;
 
 #[derive(Copy, Clone, Debug)]
@@ -100,9 +102,12 @@ unsafe extern fn interrupt_handler(number: u8,
     // println!("Frame: {:#x?}", frame);
 
     // Check if we came from userspace if so swap the gs base
-    if frame.cs & 0b11 == 0b11 {
+    let mut has_kernel_gs = frame.cs & 0b11 != 0b11;
+    if !has_kernel_gs {
         asm!("swapgs");
     }
+
+    let mut need_swap = !has_kernel_gs;
 
     let _guard = core!().enter_interrupt();
 
@@ -131,8 +136,55 @@ unsafe extern fn interrupt_handler(number: u8,
     } else {
         if number == 32 {
             print!(".");
+
+            let ds: u16;
+            asm!("mov ax, ds", out("ax") ds);
+            let es: u16;
+            asm!("mov ax, es", out("ax") es);
+
+            let mut control_block = ControlBlock::default();
+            control_block.regs = *regs;
+            control_block.rip = frame.rip;
+            control_block.rsp = frame.rsp;
+            control_block.rflags = frame.rflags;
+            control_block.cr3 = super::read_cr3();
+
+            control_block.cs = frame.cs;
+            control_block.ss = frame.ss;
+            control_block.ds = ds as u64;
+            control_block.es = es as u64;
+
+            if let Some(control_block) =
+                core!().scheduler().tick(control_block)
+            {
+                *regs = control_block.regs;
+                frame.rip = control_block.rip;
+                frame.rflags = control_block.rflags;
+                frame.rsp = control_block.rsp;
+                frame.cs = control_block.cs;
+                frame.ss = control_block.ss;
+
+                if frame.rip == 0xffffffff80198c73 {
+                    println!("Dafaq");
+                }
+
+                // Now we have the kernel gs
+                // If we came from userspace we swapped the gs
+                // But if we are returing to kernel space we don't need to swap
+                // but if we are returing to userspace we need to swap
+
+                need_swap = frame.cs & 0x11 == 0x11;
+                println!("Need Swap: {}", need_swap);
+
+                asm!("mov ds, ax", in("rax") control_block.ds);
+                asm!("mov es, ax", in("rax") control_block.es);
+
+                println!("Frame: {:#x?}", frame);
+
+                println!("Hello?");
+            }
+
             //if let Some((control_block, is_kernel)) = core!().scheduler().next() {
-                println!("{:#x}", unsafe { super::read_flags() });
                 // The control block needs to have infomation about where
                 // we are executing because we could be a userspace task but
                 // currently executing inside the kernel.
@@ -164,7 +216,7 @@ unsafe extern fn interrupt_handler(number: u8,
     }
 
     // Check if we came from userspace if so swap back to the user gs
-    if frame.cs & 0b11 == 0b11 {
+    if need_swap {
         asm!("swapgs");
     }
 }

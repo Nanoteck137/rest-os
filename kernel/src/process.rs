@@ -134,6 +134,7 @@ impl Task {
         let mut control_block = ControlBlock::default();
         control_block.rip = entry as u64;
         control_block.rsp = (stack.0 + stack_size) as u64;
+        control_block.rflags = 0x202;
         control_block.cr3 = mm::kernel_task_cr3();
 
         control_block.cs = 0x08;
@@ -153,6 +154,7 @@ impl Task {
     pub fn replace_image(&mut self, elf: &Elf) {
         // Reset the control block
         self.control_block = ControlBlock::default();
+        self.control_block.rflags = 0x202;
         self.control_block.cs = 0x30 | 3;
         self.control_block.ss = 0x28 | 3;
         self.control_block.ds = 0x28 | 3;
@@ -245,6 +247,10 @@ impl Task {
         self.control_block
     }
 
+    pub fn set_control_block(&mut self, control_block: ControlBlock) {
+        self.control_block = control_block;
+    }
+
     pub fn add_memory_space_region(&mut self,
                                    vaddr: VirtualAddress, size: usize,
                                    flags: MemoryRegionFlags)
@@ -268,12 +274,14 @@ pub fn replace_image_exec(path: String) -> ! {
     let elf = Elf::parse(&file)
         .expect("Failed to parse file");
 
-    {
-        // Switch out the image for the current task
-        let task = core!().task();
-        let mut lock = task.write();
-        lock.replace_image(&elf);
-    }
+    core!().without_interrupts(|| {
+        {
+            // Switch out the image for the current task
+            let task = core!().task();
+            let mut lock = task.write();
+            lock.replace_image(&elf);
+        }
+    });
 
     unsafe {
         // Execute the current task

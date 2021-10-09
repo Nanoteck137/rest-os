@@ -78,9 +78,7 @@ fn _start() -> ! {
 
     println!("Syscall Result: {:?}", res);
 
-    loop {
-        println!("Init");
-    }
+    loop {}
 }
 
 #[panic_handler]

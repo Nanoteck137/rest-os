@@ -19,7 +19,7 @@ static TASKS: Mutex<LinkedList<Arc<RwLock<Task>>>> =
 extern "C" {
     // fn switch_to_userspace(control_block: &ControlBlock);
     // fn switch_to_kernel(control_block: &ControlBlock);
-    fn context_switch(control_block: &ControlBlock);
+    fn context_switch(control_block: &ControlBlock) -> !;
 }
 
 pub struct Scheduler {
@@ -39,22 +39,65 @@ impl Scheduler {
         self.ready = true;
     }
 
-    pub unsafe fn force_next(&mut self) {
-        let control_block = self.next().unwrap();
+    pub unsafe fn tick(&mut self, old_control_block: ControlBlock)
+        -> Option<ControlBlock>
+    {
+        if !self.ready {
+            return None;
+        }
+
+        let control_block = core!().without_interrupts(|| {
+            {
+                core!().task().write().set_control_block(old_control_block);
+            }
+            let control_block = self.next_when_ready(self.ready);
+
+            control_block
+        });
+
+        control_block
+    }
+
+    pub unsafe fn force_next(&mut self) -> ! {
+        let control_block = self.next_when_ready(true)
+            .unwrap();
 
         // TODO(patrik): This should check if we are switching to
+        // kernel or userspace
+        if control_block.cs & 3 == 3 {
+            asm!("swapgs");
+        }
+
+        // TODO(patrik): Check Task::flags to see if we should switch to
         // kernel or userspace
         context_switch(&control_block);
     }
 
-    pub unsafe fn next(&mut self) -> Option<ControlBlock> {
-        if !self.ready {
+    pub unsafe fn next(&mut self) {
+        let control_block = self.next_when_ready(self.ready)
+            .unwrap();
+
+        // TODO(patrik): This should check if we are switching to
+        // kernel or userspace
+        if control_block.cs & 3 == 3 {
+            asm!("swapgs");
+        }
+
+        // TODO(patrik): Check Task::flags to see if we should switch to
+        // kernel or userspace
+        context_switch(&control_block);
+    }
+
+    unsafe fn next_when_ready(&mut self, ready: bool)
+        -> Option<ControlBlock>
+    {
+        if !ready {
             return None;
         }
 
         println!("Picking next");
 
-        let control_block = {
+        let control_block = core!().without_interrupts(|| {
             let mut lock = TASKS.lock();
 
             // Push back the task we currently are executing
@@ -76,29 +119,26 @@ impl Scheduler {
             println!("Picking next: {}", task.name());
 
             control_block
-        };
+        });
 
-        // TODO(patrik): Check Task::flags to see if we should switch to
-        // kernel or userspace
-        context_switch(&control_block);
+        println!("Control Block: {:#x?}", control_block);
 
         Some(control_block)
     }
 
     pub unsafe fn exec(&mut self) -> ! {
-        let control_block = {
+        let control_block = core!().without_interrupts(|| {
             let task = self.current_task();
             let control_block = task.read().control_block();
 
             control_block
-        };
+        });
 
-        println!("Control Block: {:#x?}", control_block);
+        if control_block.cs & 3 == 3 {
+            asm!("swapgs");
+        }
 
-        println!("Switching to userspace");
-        // switch_to_userspace(&control_block);
-
-        panic!("Failed to switch to userspace");
+        context_switch(&control_block);
     }
 
     pub fn current_task(&mut self) -> Arc<RwLock<Task>> {
@@ -127,6 +167,8 @@ impl Scheduler {
 global_asm!(r#"
 .global switch_to_userspace
 context_switch:
+    cli
+
     mov rax, QWORD PTR [rdi + 0xA8]
     mov ds, ax
     mov rax, QWORD PTR [rdi + 0xB0]
@@ -163,9 +205,6 @@ context_switch:
     push QWORD PTR [rdi + 0x48]
     // Pop the value to set RDI
     pop rdi
-
-    // Swap the gs to the user gs is used insteed of the kernel gs
-    swapgs
 
     iretq
 
