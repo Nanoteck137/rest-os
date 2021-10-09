@@ -35,10 +35,15 @@ bitflags! {
 #[derive(Copy, Clone, Default, Debug)]
 #[repr(C, packed)]
 pub struct ControlBlock {
-    pub regs: Regs,
-    pub rip: u64,
-    pub rsp: u64,
-    pub cr3: u64,
+    pub regs:   Regs,
+    pub rip:    u64, // 0x78
+    pub rsp:    u64, // 0x80
+    pub rflags: u64, // 0x88
+    pub cr3:    u64, // 0x90
+    pub cs:     u64, // 0x98
+    pub ss:     u64, // 0xA0
+    pub ds:     u64, // 0xA8
+    pub es:     u64, // 0xB0
 }
 
 bitflags! {
@@ -131,6 +136,11 @@ impl Task {
         control_block.rsp = (stack.0 + stack_size) as u64;
         control_block.cr3 = mm::kernel_task_cr3();
 
+        control_block.cs = 0x08;
+        control_block.ss = 0x10;
+        control_block.ds = 0x10;
+        control_block.es = 0x10;
+
         Self {
             name,
             flags,
@@ -143,6 +153,10 @@ impl Task {
     pub fn replace_image(&mut self, elf: &Elf) {
         // Reset the control block
         self.control_block = ControlBlock::default();
+        self.control_block.cs = 0x30 | 3;
+        self.control_block.ss = 0x28 | 3;
+        self.control_block.ds = 0x28 | 3;
+        self.control_block.es = 0x28 | 3;
 
         let mut memory_space = MemorySpace::new();
 

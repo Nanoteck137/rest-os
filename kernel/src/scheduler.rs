@@ -17,8 +17,9 @@ static TASKS: Mutex<LinkedList<Arc<RwLock<Task>>>> =
     Mutex::new(LinkedList::new());
 
 extern "C" {
-    fn switch_to_userspace(control_block: &ControlBlock);
-    fn switch_to_kernel(control_block: &ControlBlock);
+    // fn switch_to_userspace(control_block: &ControlBlock);
+    // fn switch_to_kernel(control_block: &ControlBlock);
+    fn context_switch(control_block: &ControlBlock);
 }
 
 pub struct Scheduler {
@@ -43,7 +44,7 @@ impl Scheduler {
 
         // TODO(patrik): This should check if we are switching to
         // kernel or userspace
-        switch_to_kernel(&control_block);
+        context_switch(&control_block);
     }
 
     pub unsafe fn next(&mut self) -> Option<ControlBlock> {
@@ -79,7 +80,7 @@ impl Scheduler {
 
         // TODO(patrik): Check Task::flags to see if we should switch to
         // kernel or userspace
-        switch_to_kernel(&control_block);
+        context_switch(&control_block);
 
         Some(control_block)
     }
@@ -95,7 +96,7 @@ impl Scheduler {
         println!("Control Block: {:#x?}", control_block);
 
         println!("Switching to userspace");
-        switch_to_userspace(&control_block);
+        // switch_to_userspace(&control_block);
 
         panic!("Failed to switch to userspace");
     }
@@ -125,6 +126,49 @@ impl Scheduler {
 
 global_asm!(r#"
 .global switch_to_userspace
+context_switch:
+    mov rax, QWORD PTR [rdi + 0xA8]
+    mov ds, ax
+    mov rax, QWORD PTR [rdi + 0xB0]
+    mov es, ax
+
+    // Setup the iretq frame
+    push QWORD PTR [rdi + 0xA0] // Stack segment
+    push QWORD PTR [rdi + 0x80] // RSP
+    push QWORD PTR [rdi + 0x88] // RFLAGS
+    push QWORD PTR [rdi + 0x98] // Code segment
+    push QWORD PTR [rdi + 0x78] // RIP
+
+    // Setup the cr3 register
+    mov rax, QWORD PTR [rdi + 0x90]
+    mov cr3, rax
+
+    mov r15, QWORD PTR [rdi + 0x00]
+    mov r14, QWORD PTR [rdi + 0x08]
+    mov r13, QWORD PTR [rdi + 0x10]
+    mov r12, QWORD PTR [rdi + 0x18]
+    mov r11, QWORD PTR [rdi + 0x20]
+    mov r10, QWORD PTR [rdi + 0x28]
+    mov r9,  QWORD PTR [rdi + 0x30]
+    mov r8,  QWORD PTR [rdi + 0x38]
+    mov rbp, QWORD PTR [rdi + 0x40]
+    // mov rdi, QWORD PTR [rdi + 0x48]
+    mov rsi, QWORD PTR [rdi + 0x50]
+    mov rdx, QWORD PTR [rdi + 0x58]
+    mov rcx, QWORD PTR [rdi + 0x60]
+    mov rbx, QWORD PTR [rdi + 0x68]
+    mov rax, QWORD PTR [rdi + 0x70]
+
+    // Now we can set push the value RDI needs
+    push QWORD PTR [rdi + 0x48]
+    // Pop the value to set RDI
+    pop rdi
+
+    // Swap the gs to the user gs is used insteed of the kernel gs
+    swapgs
+
+    iretq
+
 // rdi - Control Block
 switch_to_userspace:
     mov ax, 0x28 | 3
