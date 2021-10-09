@@ -375,10 +375,18 @@ impl TryFrom<u32> for ProgramHeaderType {
     }
 }
 
+bitflags! {
+    pub struct ProgramHeaderFlags: u32 {
+        const EXECUTE = 0x1;
+        const WRITE   = 0x2;
+        const READ    = 0x4;
+    }
+}
+
 #[derive(Debug)]
 pub struct ProgramHeader {
     typ: ProgramHeaderType,
-    flags: u32,
+    flags: ProgramHeaderFlags,
     offset: u64,
     vaddr: u64,
     paddr: u64,
@@ -407,6 +415,8 @@ impl ProgramHeader {
 
         let alignment = u64::from_le_bytes(bytes[48..56].try_into().ok()?);
 
+        let flags = ProgramHeaderFlags::from_bits_truncate(flags);
+
         Some(Self {
             typ,
             flags,
@@ -423,7 +433,7 @@ impl ProgramHeader {
         self.typ
     }
 
-    pub fn flags(&self) -> u32 {
+    pub fn flags(&self) -> ProgramHeaderFlags {
         self.flags
     }
 

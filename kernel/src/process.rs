@@ -1,15 +1,18 @@
 //! Module to handle processes
 
-use crate::arch::x86_64::Regs;
-use crate::elf::{ Elf, ProgramHeaderType };
+use crate::arch::x86_64:: { Regs, PageTable };
+use crate::elf::{ Elf, ProgramHeaderType, ProgramHeaderFlags };
 use crate::mm;
 use crate::mm::{ VirtualAddress, PAGE_SIZE };
 
 use bitflags::bitflags;
 
+use spin::RwLock;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::borrow::ToOwned;
+use alloc::sync::Arc;
 
 use core::sync::atomic::{ AtomicUsize, Ordering };
 
@@ -35,6 +38,68 @@ pub struct ControlBlock {
     pub regs: Regs,
     pub rip: u64,
     pub rsp: u64,
+    pub cr3: u64,
+}
+
+bitflags! {
+    pub struct MemoryRegionFlags: u32 {
+        const READ    = 1 << 0;
+        const WRITE   = 1 << 1;
+        const EXECUTE = 1 << 2;
+    }
+}
+
+#[derive(Debug)]
+struct MemoryRegion {
+    addr: VirtualAddress,
+    size: usize,
+    flags: MemoryRegionFlags,
+}
+
+impl MemoryRegion {
+    fn new(addr: VirtualAddress, size: usize,
+           flags: MemoryRegionFlags)
+        -> Self
+    {
+        Self {
+            addr,
+            size,
+            flags
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MemorySpace {
+    regions: Vec<MemoryRegion>,
+    page_table: PageTable,
+}
+
+impl MemorySpace {
+    fn new() -> Self {
+        Self {
+            regions: Vec::new(),
+            page_table: mm::create_page_table(),
+        }
+    }
+
+    pub fn add_region(&mut self, addr: VirtualAddress, size: usize,
+                      flags: MemoryRegionFlags)
+    {
+        // TODO(patrik): Check if we already has a region or if this new
+        // region overlaps other regions
+
+        let region = MemoryRegion::new(addr, size, flags);
+        self.regions.push(region);
+    }
+
+    pub fn page_table(&self) -> &PageTable {
+        &self.page_table
+    }
+
+    pub fn page_table_mut(&mut self) -> &mut PageTable {
+        &mut self.page_table
+    }
 }
 
 #[derive(Debug)]
@@ -44,6 +109,11 @@ pub struct Task {
     pid: usize,
 
     control_block: ControlBlock,
+    // NOTE(patrik): If we are a kernel task then we don't need memory space
+    // because a kernel task is always executing inside kernel space
+    // TODO(patrik): Task should share memory space with other tasks that are
+    // that share the space address space (like child threads)
+    memory_space: Option<Arc<RwLock<MemorySpace>>>,
 }
 
 impl Task {
@@ -59,12 +129,14 @@ impl Task {
         let mut control_block = ControlBlock::default();
         control_block.rip = entry as u64;
         control_block.rsp = (stack.0 + stack_size) as u64;
+        control_block.cr3 = mm::kernel_task_cr3();
 
         Self {
             name,
             flags,
             pid,
             control_block,
+            memory_space: None,
         }
     }
 
@@ -72,15 +144,43 @@ impl Task {
         // Reset the control block
         self.control_block = ControlBlock::default();
 
+        let mut memory_space = MemorySpace::new();
+
+        let old_cr3: u64;
+
+        // TODO(patrik): Should we do this
+        unsafe {
+            asm!("mov {}, cr3", out(reg) old_cr3);
+
+            let addr = memory_space.page_table().addr().0 as u64;
+            asm!("mov cr3, {}", in(reg) addr);
+        }
+
         // Load the program headers
         for program_header in elf.program_headers() {
             if program_header.typ() == ProgramHeaderType::Load {
                 println!("Load: {:#x?}", program_header);
                 // assert!(program_header.alignment() == 0x1000);
 
+                let mut flags = MemoryRegionFlags::empty();
+                if program_header.flags().contains(ProgramHeaderFlags::READ) {
+                    flags |= MemoryRegionFlags::READ;
+                }
+
+                if program_header.flags().contains(ProgramHeaderFlags::WRITE) {
+                    flags |= MemoryRegionFlags::WRITE;
+                }
+
+                if program_header.flags()
+                        .contains(ProgramHeaderFlags::EXECUTE)
+                {
+                    flags |= MemoryRegionFlags::EXECUTE;
+                }
+
                 let data = elf.program_data(&program_header);
                 let size = program_header.memory_size() as usize;
-                mm::map_in_userspace(program_header.vaddr(), size)
+                mm::map_in_userspace(&mut memory_space,
+                                     program_header.vaddr(), size, flags)
                     .expect("Failed to map in userspace");
 
                 let source = data.as_ptr();
@@ -96,7 +196,10 @@ impl Task {
         // TODO(patrik): What should the initial stack size be
         let stack_start = VirtualAddress(0x0000700000000000);
         let stack_size = PAGE_SIZE * 4;
-        mm::map_in_userspace(stack_start, stack_size)
+        mm::map_in_userspace(&mut memory_space,
+                             stack_start, stack_size,
+                             MemoryRegionFlags::READ |
+                             MemoryRegionFlags::WRITE)
             .expect("Failed to map in stack");
 
         unsafe {
@@ -107,6 +210,13 @@ impl Task {
         self.control_block.rsp = (stack_start.0 + stack_size) as u64;
         // Set the rip register to the elf entry
         self.control_block.rip = elf.entry();
+        self.control_block.cr3 = memory_space.page_table().addr().0 as u64;
+
+        self.memory_space = Some(Arc::new(RwLock::new(memory_space)));
+
+        unsafe {
+            asm!("mov cr3, {}", in(reg) old_cr3);
+        }
     }
 
     pub fn name(&self) -> &String {
@@ -119,6 +229,20 @@ impl Task {
 
     pub fn control_block(&self) -> ControlBlock {
         self.control_block
+    }
+
+    pub fn add_memory_space_region(&mut self,
+                                   vaddr: VirtualAddress, size: usize,
+                                   flags: MemoryRegionFlags)
+    {
+        let memory_space = self.memory_space.as_ref().unwrap();
+        let mut lock = memory_space.write();
+
+        lock.add_region(vaddr, size, flags);
+    }
+
+    pub fn memory_space(&mut self) -> &Arc<RwLock<MemorySpace>> {
+        self.memory_space.as_ref().unwrap()
     }
 }
 

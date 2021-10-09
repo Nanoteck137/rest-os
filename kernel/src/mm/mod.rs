@@ -2,6 +2,7 @@ use crate::arch;
 use crate::arch::x86_64::{ PageTable, PageType };
 
 use crate::multiboot::Multiboot;
+use crate::process::{ Task, MemorySpace, MemoryRegionFlags };
 
 use core::convert::TryFrom;
 
@@ -9,7 +10,7 @@ use alloc::sync::{ Arc, Weak };
 use alloc::string::String;
 use alloc::collections::BTreeMap;
 
-use spin::{ Mutex, RwLock };
+use spin::{ Mutex, RwLock, RwLockWriteGuard };
 
 pub use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
 pub use heap_alloc::Allocator;
@@ -294,12 +295,16 @@ impl MemoryManager {
         Some(result)
     }
 
-    fn map_in_userspace(&mut self, vaddr: VirtualAddress, size: usize)
+    fn map_in_userspace(&mut self, memory_space: &mut MemorySpace,
+                        vaddr: VirtualAddress, size: usize,
+                        flags: MemoryRegionFlags)
         -> Option<()>
     {
         let pages = size / PAGE_SIZE + 1;
 
-        let page_table = &mut self.reference_page_table;
+        // let page_table = &mut self.reference_page_table;
+
+        let page_table = memory_space.page_table_mut();
 
         for page in 0..pages {
             unsafe {
@@ -315,6 +320,8 @@ impl MemoryManager {
                     .expect("Failed to map");
             }
         }
+
+        memory_space.add_region(vaddr, size, flags);
 
         Some(())
     }
@@ -365,14 +372,8 @@ impl MemoryManager {
         region.is_mapped = true;
     }
 
-    fn get_current_page_table() -> PageTable {
-        let cr3 = unsafe { arch::x86_64::read_cr3() };
-
-        let page_table = unsafe {
-            PageTable::from_table(PhysicalAddress(cr3 as usize))
-        };
-
-        page_table
+    fn get_current_page_table<'a>()  {
+        // core!().task().write().memory_space().write()
     }
 
     fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
@@ -385,7 +386,13 @@ impl MemoryManager {
         }
 
         // TODO(patrik): Let the page table handle the copying of the entries
-        let page_table = Self::get_current_page_table();
+        // let page_table = Self::get_current_page_table();
+
+        let task = core!().task();
+        let mut task_lock = task.write();
+
+        let mut memory_space = task_lock.memory_space().write();
+        let page_table = memory_space.page_table_mut();
 
         let (start_p4, _, _, _, _) = PageTable::index(VMALLOC_START);
         let (end_p4, _, _, _, _) = PageTable::index(VMALLOC_END);
@@ -413,6 +420,10 @@ impl MemoryManager {
         }
 
         false
+    }
+
+    fn kernel_task_cr3(&self) -> u64 {
+        self.reference_page_table.addr().0 as u64
     }
 }
 
@@ -446,10 +457,25 @@ pub fn allocate_kernel_vm_zero(name: String, size: usize)
     res
 }
 
-pub fn map_in_userspace(vaddr: VirtualAddress, size: usize) -> Option<()> {
-    MM.lock().as_mut().unwrap().map_in_userspace(vaddr, size)
+pub fn map_in_userspace(memory_space: &mut MemorySpace,
+                        vaddr: VirtualAddress, size: usize,
+                        flags: MemoryRegionFlags)
+    -> Option<()>
+{
+    MM.lock().as_mut().unwrap().map_in_userspace(memory_space,
+                                                 vaddr, size, flags)
 }
 
 pub fn page_fault(vaddr: VirtualAddress) -> bool {
     MM.lock().as_mut().unwrap().page_fault(vaddr)
+}
+
+pub fn create_page_table() -> PageTable {
+    MM.lock().as_mut().unwrap().create_page_table()
+}
+
+// TODO(patrik): Remove this and find a better way to initialize a kernel task
+// cr3 register
+pub fn kernel_task_cr3() -> u64 {
+    MM.lock().as_mut().unwrap().kernel_task_cr3()
 }

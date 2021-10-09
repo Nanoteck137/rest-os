@@ -213,7 +213,8 @@ impl PageTable {
     }
 
     pub unsafe fn map_raw_option<F, P>(&mut self,
-                                       frame_allocator: &mut F, physical_memory: &P,
+                                       frame_allocator: &mut F,
+                                       physical_memory: &P,
                                        vaddr: VirtualAddress,
                                        paddr: PhysicalAddress,
                                        page_type: PageType,
@@ -333,7 +334,8 @@ impl PageTable {
     }
 
     pub unsafe fn unmap_raw<F, P>(&mut self,
-                                  frame_allocator: &mut F, physical_memory: &P,
+                                  frame_allocator: &mut F,
+                                  physical_memory: &P,
                                   vaddr: VirtualAddress)
         -> Option<()>
 

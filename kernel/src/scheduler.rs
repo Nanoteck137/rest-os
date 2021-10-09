@@ -70,6 +70,8 @@ impl Scheduler {
             control_block
         };
 
+        println!("Control Block: {:#x?}", control_block);
+
         println!("Switching to userspace");
         switch_to_userspace(&control_block);
 
@@ -115,6 +117,10 @@ switch_to_userspace:
     push 0x30 | 3
     // RIP
     push QWORD PTR [rdi + 0x78]
+
+    // Setup the cr3 register
+    mov rax, QWORD PTR [rdi + 0x88]
+    mov cr3, rax
 
     mov r15, QWORD PTR [rdi + 0x00]
     mov r14, QWORD PTR [rdi + 0x08]

@@ -53,6 +53,12 @@ macro_rules! verify_interrupts_disabled {
     }}
 }
 
+// Pull in the `alloc` create
+#[macro_use] extern crate alloc;
+/// Pull in the kernel api crate
+#[macro_use] extern crate kernel_api;
+#[macro_use] extern crate bitflags;
+
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
 #[macro_use] mod processor;
@@ -64,11 +70,6 @@ mod process;
 mod scheduler;
 mod cpio;
 mod elf;
-
-// Pull in the `alloc` create
-#[macro_use] extern crate alloc;
-/// Pull in the kernel api crate
-#[macro_use] extern crate kernel_api;
 
 use core::panic::PanicInfo;
 use core::alloc::Layout;

@@ -66,6 +66,8 @@ fn syscall_handler(regs: &mut Regs) {
     }
 
     if number == 0x11 {
+        println!("Task: {:#x?}", core!().task());
+
         unsafe {
             if let Some(_) = user_write::<u64>(arg0, 0x1337) {
                 regs.rax = KernelError::Success as u64;
