@@ -216,7 +216,10 @@ impl MemoryManager {
                 let paddr = PhysicalAddress(addr - KERNEL_TEXT_START.0);
                 page_table.map_raw(&mut self.frame_allocator,
                                    &BOOT_PHYSICAL_MEMORY,
-                                   vaddr, paddr, PageType::Page2M)
+                                   vaddr, paddr, PageType::Page2M,
+                                   MemoryRegionFlags::READ |
+                                   MemoryRegionFlags::WRITE |
+                                   MemoryRegionFlags::EXECUTE)
                     .expect("Failed to map");
             }
 
@@ -226,7 +229,9 @@ impl MemoryManager {
                 let paddr = PhysicalAddress(offset);
                 page_table.map_raw(&mut self.frame_allocator,
                                    &BOOT_PHYSICAL_MEMORY,
-                                   vaddr, paddr, PageType::Page2M)
+                                   vaddr, paddr, PageType::Page2M,
+                                   MemoryRegionFlags::READ |
+                                   MemoryRegionFlags::WRITE)
                     .expect("Failed to map");
             }
 
@@ -290,7 +295,8 @@ impl MemoryManager {
         self.kernel_regions.insert(addr, region.clone());
 
         let mut region = region.write();
-        self.map_region(&mut region);
+        self.map_region(&mut region, MemoryRegionFlags::READ |
+                                     MemoryRegionFlags::WRITE);
 
         Some(result)
     }
@@ -316,7 +322,8 @@ impl MemoryManager {
                                    &crate::KERNEL_PHYSICAL_MEMORY,
                                    vaddr,
                                    PhysicalAddress::from(frame),
-                                   PageType::Page4K)
+                                   PageType::Page4K,
+                                   flags)
                     .expect("Failed to map");
             }
         }
@@ -350,7 +357,8 @@ impl MemoryManager {
         vaddr >= VMALLOC_START && vaddr < VMALLOC_END
     }
 
-    fn map_region(&mut self, region: &mut VMRegion) {
+    fn map_region(&mut self, region: &mut VMRegion,
+                  region_flags: MemoryRegionFlags) {
         assert!(!region.is_mapped, "Region already mapped");
 
         let page_table = &mut self.reference_page_table;
@@ -364,7 +372,8 @@ impl MemoryManager {
                                    &crate::KERNEL_PHYSICAL_MEMORY,
                                    region.addr() + (page * PAGE_SIZE),
                                    PhysicalAddress::from(frame),
-                                   PageType::Page4K)
+                                   PageType::Page4K,
+                                   region_flags)
                     .expect("Failed to map");
             }
         }
@@ -382,7 +391,9 @@ impl MemoryManager {
         let mut region = region.write();
 
         if !region.is_mapped {
-            self.map_region(&mut region);
+            self.map_region(&mut region,
+                            MemoryRegionFlags::READ |
+                            MemoryRegionFlags::WRITE);
         }
 
         // TODO(patrik): Let the page table handle the copying of the entries

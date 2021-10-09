@@ -9,16 +9,28 @@
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory, Frame };
 use crate::mm::{ FrameAllocator, PAGE_SIZE };
 
+use crate::process::MemoryRegionFlags;
+
 use core::convert::TryFrom;
 
-const PAGE_PRESENT:         usize = 1 << 0;
-const PAGE_WRITE:           usize = 1 << 1;
-const PAGE_USER:            usize = 1 << 2;
-const PAGE_CACHE_DISABLE:   usize = 1 << 4;
-const PAGE_ACCESSED:        usize = 1 << 5;
-const PAGE_DIRTY:           usize = 1 << 6;
-const PAGE_HUGE:            usize = 1 << 7;
-const PAGE_NX:              usize = 1 << 63;
+bitflags! {
+    struct TaskFlags: u32 {
+        const KERNEL = 0b00000001;
+    }
+}
+
+bitflags! {
+    struct EntryFlags: usize {
+        const PRESENT  = 1 << 0;
+        const WRITE    = 1 << 1;
+        const USER     = 1 << 2;
+        const DISABLE  = 1 << 4;
+        const ACCESSED = 1 << 5;
+        const DIRTY    = 1 << 6;
+        const SIZE     = 1 << 7;
+        const NX       = 1 << 63;
+    }
+}
 
 #[derive(PartialEq)]
 pub enum PageType {
@@ -32,60 +44,16 @@ pub enum PageType {
 pub struct Entry(usize);
 
 impl Entry {
-    /// Is the entry present
-    fn is_present(&self) -> bool {
-        self.0 & PAGE_PRESENT != 0
+    fn set_flags(&mut self, flags: EntryFlags) {
+        self.0 |= flags.bits();
     }
 
-    /// Set the present flag
-    fn set_present(&mut self, value: bool) {
-        self.0 &= !PAGE_PRESENT;
-        if value {
-            self.0 |= PAGE_PRESENT;
-        }
-    }
-
-    // Is the entry writable
-    fn is_writable(&self) -> bool {
-        self.0 & PAGE_WRITE != 0
-    }
-
-    /// Set the write flag
-    fn set_writable(&mut self, value: bool) {
-        self.0 &= !PAGE_WRITE;
-        if value {
-            self.0 |= PAGE_WRITE;
-        }
-    }
-
-    // Is the entry user accessible
-    fn is_user(&self) -> bool {
-        self.0 & PAGE_USER != 0
-    }
-
-    /// Set the user accessible flag
-    fn set_user(&mut self, value: bool) {
-        self.0 &= !PAGE_USER;
-        if value {
-            self.0 |= PAGE_USER;
-        }
-    }
-
-    // Is the entry huge
-    fn is_huge(&self) -> bool {
-        self.0 & PAGE_HUGE != 0
-    }
-
-    /// Set the huge flag
-    fn set_huge(&mut self, value: bool) {
-        self.0 &= !PAGE_HUGE;
-        if value {
-            self.0 |= PAGE_HUGE;
-        }
+    fn flags(&self) -> EntryFlags {
+        EntryFlags::from_bits_truncate(self.0)
     }
 
     /// Get the address
-    fn get_address(&self) -> usize {
+    fn address(&self) -> usize {
         self.0 & 0x000ffffffffff000
     }
 
@@ -170,13 +138,13 @@ impl PageTable {
 
             let entry = physical_memory.read::<Entry>(entry_addr);
 
-            if !entry.is_present() {
+            if !entry.flags().contains(EntryFlags::PRESENT) {
                 break;
             }
 
-            table = PhysicalAddress(entry.get_address());
+            table = PhysicalAddress(entry.address());
 
-            if depth == 3 || entry.is_huge() {
+            if depth == 3 || entry.flags().contains(EntryFlags::SIZE) {
                 break;
             }
         }
@@ -188,37 +156,51 @@ impl PageTable {
                                 frame_allocator: &mut F, physical_memory: &P,
                                 vaddr: VirtualAddress,
                                 paddr: PhysicalAddress,
-                                page_type: PageType)
+                                page_type: PageType,
+                                flags: MemoryRegionFlags)
         -> Option<()>
 
         where F: FrameAllocator,
               P: PhysicalMemory
     {
+        // TODO(patrik): Implement No execute bit flag
+        let mut page_flags = EntryFlags::PRESENT | EntryFlags::USER;
+        if flags.contains(MemoryRegionFlags::WRITE) {
+            page_flags |= EntryFlags::WRITE;
+        }
+
         self.map_raw_option(frame_allocator, physical_memory,
-                            vaddr, paddr, page_type, false)
+                            vaddr, paddr, page_type, page_flags)
     }
 
     pub unsafe fn map_raw_user<F, P>(&mut self,
                                      frame_allocator: &mut F, physical_memory: &P,
                                      vaddr: VirtualAddress,
                                      paddr: PhysicalAddress,
-                                     page_type: PageType)
+                                     page_type: PageType,
+                                     flags: MemoryRegionFlags)
         -> Option<()>
 
         where F: FrameAllocator,
               P: PhysicalMemory
     {
+        // TODO(patrik): Implement No execute bit flag
+        let mut page_flags = EntryFlags::PRESENT | EntryFlags::USER;
+        if flags.contains(MemoryRegionFlags::WRITE) {
+            page_flags |= EntryFlags::WRITE;
+        }
+
         self.map_raw_option(frame_allocator, physical_memory,
-                            vaddr, paddr, page_type, true)
+                            vaddr, paddr, page_type, page_flags)
     }
 
-    pub unsafe fn map_raw_option<F, P>(&mut self,
-                                       frame_allocator: &mut F,
-                                       physical_memory: &P,
-                                       vaddr: VirtualAddress,
-                                       paddr: PhysicalAddress,
-                                       page_type: PageType,
-                                       user: bool)
+    unsafe fn map_raw_option<F, P>(&mut self,
+                                   frame_allocator: &mut F,
+                                   physical_memory: &P,
+                                   vaddr: VirtualAddress,
+                                   paddr: PhysicalAddress,
+                                   page_type: PageType,
+                                   page_flags: EntryFlags)
         -> Option<()>
 
         where F: FrameAllocator,
@@ -259,10 +241,13 @@ impl PageTable {
                 let addr = entries[index - 1].unwrap();
 
                 let mut new_entry = Entry(0);
+                let mut flags = EntryFlags::PRESENT | EntryFlags::WRITE;
+                if page_flags.contains(EntryFlags::USER) {
+                    flags |= EntryFlags::USER;
+                }
+
                 new_entry.set_address(new_table);
-                new_entry.set_present(true);
-                new_entry.set_writable(true);
-                new_entry.set_user(user);
+                new_entry.set_flags(flags);
                 physical_memory.write::<Entry>(addr, new_entry);
 
                 entries[index] = Some(PhysicalAddress(
@@ -273,13 +258,13 @@ impl PageTable {
         }
 
         let mut entry = Entry(0);
-        entry.set_address(paddr);
-        entry.set_present(true);
-        entry.set_writable(true);
-        entry.set_user(user);
+        let mut flags = page_flags;
         if page_type != PageType::Page4K {
-            entry.set_huge(true);
+            flags |= EntryFlags::SIZE;
         }
+
+        entry.set_address(paddr);
+        entry.set_flags(flags);
 
         physical_memory.write::<Entry>(entries[depth - 1].unwrap(), entry);
 
@@ -300,7 +285,7 @@ impl PageTable {
             let entry_addr = PhysicalAddress(table_addr.0 + entry_off);
             let entry = physical_memory.read::<Entry>(entry_addr);
 
-            if entry.is_present() {
+            if entry.flags().contains(EntryFlags::PRESENT) {
                 result = false;
                 break;
             }
@@ -347,7 +332,9 @@ impl PageTable {
 
         if let Some(p1) = mapping.p1 {
             let mut entry = physical_memory.read::<Entry>(p1);
-            entry.set_present(false);
+            let mut entry_flags = entry.flags();
+            entry_flags.remove(EntryFlags::PRESENT);
+            entry.set_flags(entry_flags);
             physical_memory.write::<Entry>(p1, entry);
 
             Self::invalidate_page(vaddr);
@@ -368,13 +355,17 @@ impl PageTable {
                 {
                     let mut entry =
                         physical_memory.read::<Entry>(next_mapping);
-                    entry.set_present(false);
+                    let mut entry_flags = entry.flags();
+                    entry_flags.remove(EntryFlags::PRESENT);
+                    entry.set_flags(entry_flags);
                     physical_memory.write::<Entry>(next_mapping, entry);
                 }
             }
         } else if let Some(p2) = mapping.p2 {
             let mut entry = physical_memory.read::<Entry>(p2);
-            entry.set_present(false);
+            let mut entry_flags = entry.flags();
+            entry_flags.remove(EntryFlags::PRESENT);
+            entry.set_flags(entry_flags);
             physical_memory.write::<Entry>(p2, entry);
 
             Self::invalidate_page(vaddr);
@@ -394,7 +385,9 @@ impl PageTable {
                 {
                     let mut entry =
                         physical_memory.read::<Entry>(next_mapping);
-                    entry.set_present(false);
+                    let mut entry_flags = entry.flags();
+                    entry_flags.remove(EntryFlags::PRESENT);
+                    entry.set_flags(entry_flags);
                     physical_memory.write::<Entry>(next_mapping, entry);
                 }
             }

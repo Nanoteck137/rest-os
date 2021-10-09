@@ -10,10 +10,10 @@
 
 /// TODO(patrik):
 ///  Currenly working on:
-///   - Go through the code and fix all the locks so they behave
 ///
 /// ---------------------------------------------------------------------------
 ///
+///   - Go through and cleanup some error handling code
 ///   - Go through the code and fix all the locks so they behave
 ///     like they should with interrupts
 ///   - Processes
@@ -280,6 +280,13 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
     Some(data)
 }
 
+fn kernel_test_task() {
+    loop {
+        println!("Kernel Task");
+        println!("Interrupts: {}", core!().is_interrupts_enabled());
+    }
+}
+
 #[no_mangle]
 extern fn kernel_init(multiboot_addr: usize) -> ! {
     arch::early_initialize();
@@ -384,7 +391,14 @@ extern fn kernel_init(multiboot_addr: usize) -> ! {
                                         kernel_init_thread);
 
     Scheduler::add_task(task);
+
+    let task = Task::create_kernel_task("Test Task".to_owned(),
+                                        kernel_test_task);
+    Scheduler::add_task(task);
+
     Scheduler::debug_dump_tasks();
+
+    core!().scheduler().set_ready();
 
     unsafe {
         core!().scheduler().next();

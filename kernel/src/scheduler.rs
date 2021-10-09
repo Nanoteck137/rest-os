@@ -23,16 +23,36 @@ extern "C" {
 
 pub struct Scheduler {
     current_task: Option<Arc<RwLock<Task>>>,
+    ready: bool,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
         Self {
             current_task: None,
+            ready: false,
         }
     }
 
-    pub unsafe fn next(&mut self) {
+    pub fn set_ready(&mut self) {
+        self.ready = true;
+    }
+
+    pub unsafe fn force_next(&mut self) {
+        let control_block = self.next().unwrap();
+
+        // TODO(patrik): This should check if we are switching to
+        // kernel or userspace
+        switch_to_kernel(&control_block);
+    }
+
+    pub unsafe fn next(&mut self) -> Option<ControlBlock> {
+        if !self.ready {
+            return None;
+        }
+
+        println!("Picking next");
+
         let control_block = {
             let mut lock = TASKS.lock();
 
@@ -60,6 +80,8 @@ impl Scheduler {
         // TODO(patrik): Check Task::flags to see if we should switch to
         // kernel or userspace
         switch_to_kernel(&control_block);
+
+        Some(control_block)
     }
 
     pub unsafe fn exec(&mut self) -> ! {

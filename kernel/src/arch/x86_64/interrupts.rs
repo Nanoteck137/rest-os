@@ -5,6 +5,7 @@
 
 use crate::mm;
 use crate::mm::VirtualAddress;
+use crate::scheduler::Scheduler;
 
 use super::Regs;
 
@@ -130,6 +131,28 @@ unsafe extern fn interrupt_handler(number: u8,
     } else {
         if number == 32 {
             print!(".");
+            //if let Some((control_block, is_kernel)) = core!().scheduler().next() {
+                println!("{:#x}", unsafe { super::read_flags() });
+                // The control block needs to have infomation about where
+                // we are executing because we could be a userspace task but
+                // currently executing inside the kernel.
+
+                // core!().scheduler().tick(regs, frame);
+
+                /*
+                *regs = control_block.regs;
+                frame.rip = control_block.rip,
+                frame.rflags = 0x202,
+                frame.rsp = control_block.rsp,
+
+                if is_kernel {
+
+                } else {
+                    frame.cs = ,
+                    frame.ss ,
+                }
+                */
+            //}
         } else {
             println!("CPU Interrupts: {}", number);
             println!("Frame: {:#x?}", frame);
