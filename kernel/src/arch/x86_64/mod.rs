@@ -36,6 +36,10 @@ impl ArchInfo {
             tss: None,
         }
     }
+
+    pub fn set_kernel_stack(&mut self, kernel_stack: u64) {
+        self.tss.as_mut().expect("No TSS Available").set_kernel_stack(kernel_stack);
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]

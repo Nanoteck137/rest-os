@@ -12,6 +12,9 @@
 ///  Currenly working on:
 ///
 /// ---------------------------------------------------------------------------
+///   - Fix the problem with context switching from Ring4 -> Ring0
+///     - Set the RSP0 to a valid kernel stack so when a interrupt is raised
+///       then when the processor is in Ring4 we have a valid stack to use
 ///
 ///   - Go through and cleanup some error handling code
 ///   - Go through the code and fix all the locks so they behave

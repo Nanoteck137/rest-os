@@ -1,5 +1,7 @@
 //! Module to schedule processes and threads
 
+use crate::arch::x86_64::Regs;
+
 use crate::mm;
 use crate::mm::{ VirtualAddress, PAGE_SIZE };
 //use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
@@ -16,10 +18,24 @@ use spin::{ Mutex, RwLock };
 static TASKS: Mutex<LinkedList<Arc<RwLock<Task>>>> =
     Mutex::new(LinkedList::new());
 
+#[derive(Copy, Clone, Default, Debug)]
+#[repr(C, packed)]
+pub struct RegisterState {
+    pub regs: Regs,
+    pub rip:    u64, // 0x78
+    pub rsp:    u64, // 0x80
+    pub rflags: u64, // 0x88
+    pub cr3:    u64, // 0x90
+    pub cs:     u64, // 0x98
+    pub ss:     u64, // 0xA0
+    pub ds:     u64, // 0xA8
+    pub es:     u64, // 0xB0
+}
+
 extern "C" {
     // fn switch_to_userspace(control_block: &ControlBlock);
     // fn switch_to_kernel(control_block: &ControlBlock);
-    fn context_switch(control_block: &ControlBlock) -> !;
+    fn do_context_switch(register_state: &RegisterState) -> !;
 }
 
 pub struct Scheduler {
@@ -39,7 +55,7 @@ impl Scheduler {
         self.ready = true;
     }
 
-    pub unsafe fn tick(&mut self, old_control_block: ControlBlock)
+    pub unsafe fn tick(&mut self, register_state: RegisterState)
         -> Option<ControlBlock>
     {
         if !self.ready {
@@ -48,7 +64,7 @@ impl Scheduler {
 
         let control_block = core!().without_interrupts(|| {
             {
-                core!().task().write().set_control_block(old_control_block);
+                core!().task().write().update_control_block(register_state);
             }
             let control_block = self.next_when_ready(self.ready);
 
@@ -70,10 +86,10 @@ impl Scheduler {
 
         // TODO(patrik): Check Task::flags to see if we should switch to
         // kernel or userspace
-        context_switch(&control_block);
+        self.context_switch(control_block);
     }
 
-    pub unsafe fn next(&mut self) {
+    pub unsafe fn next(&mut self) -> ! {
         let control_block = self.next_when_ready(self.ready)
             .unwrap();
 
@@ -85,7 +101,7 @@ impl Scheduler {
 
         // TODO(patrik): Check Task::flags to see if we should switch to
         // kernel or userspace
-        context_switch(&control_block);
+        self.context_switch(control_block);
     }
 
     unsafe fn next_when_ready(&mut self, ready: bool)
@@ -138,7 +154,24 @@ impl Scheduler {
             asm!("swapgs");
         }
 
-        context_switch(&control_block);
+        self.context_switch(control_block);
+    }
+
+    pub unsafe fn context_switch(&mut self, control_block: ControlBlock) -> ! {
+        core!().arch().set_kernel_stack(control_block.kernel_stack);
+
+        let mut register_state = RegisterState::default();
+        register_state.regs = control_block.regs;
+        register_state.rip = control_block.rip;
+        register_state.rsp = control_block.stack;
+        register_state.rflags = control_block.rflags;
+        register_state.cr3 = control_block.cr3;
+        register_state.cs = control_block.cs;
+        register_state.ss = control_block.ss;
+        register_state.ds = control_block.ds;
+        register_state.es = control_block.es;
+
+        do_context_switch(&register_state);
     }
 
     pub fn current_task(&mut self) -> Arc<RwLock<Task>> {
@@ -165,8 +198,8 @@ impl Scheduler {
 }
 
 global_asm!(r#"
-.global switch_to_userspace
-context_switch:
+.global do_context_switch
+do_context_switch:
     cli
 
     mov rax, QWORD PTR [rdi + 0xA8]

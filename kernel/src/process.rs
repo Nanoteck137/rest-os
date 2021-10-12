@@ -5,6 +5,8 @@ use crate::elf::{ Elf, ProgramHeaderType, ProgramHeaderFlags };
 use crate::mm;
 use crate::mm::{ VirtualAddress, PAGE_SIZE };
 
+use crate::scheduler::RegisterState;
+
 use bitflags::bitflags;
 
 use spin::RwLock;
@@ -33,17 +35,18 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-#[repr(C, packed)]
 pub struct ControlBlock {
     pub regs:   Regs,
-    pub rip:    u64, // 0x78
-    pub rsp:    u64, // 0x80
-    pub rflags: u64, // 0x88
-    pub cr3:    u64, // 0x90
-    pub cs:     u64, // 0x98
-    pub ss:     u64, // 0xA0
-    pub ds:     u64, // 0xA8
-    pub es:     u64, // 0xB0
+    pub rip:    u64,
+    pub rflags: u64,
+    pub cr3:    u64,
+    pub cs:     u64,
+    pub ss:     u64,
+    pub ds:     u64,
+    pub es:     u64,
+
+    pub stack: u64,
+    pub kernel_stack: u64,
 }
 
 bitflags! {
@@ -124,7 +127,7 @@ pub struct Task {
 impl Task {
     pub fn create_kernel_task(name: String, entry: fn()) -> Self {
         let stack_size = PAGE_SIZE * 2;
-        let stack = mm::allocate_kernel_vm_zero(format!("{}: Stack", name),
+        let stack = mm::allocate_kernel_vm_zero(format!("{}: Kernel Stack", name),
                                                 stack_size)
             .expect("Failed to allocate kernel task stack");
 
@@ -133,9 +136,12 @@ impl Task {
 
         let mut control_block = ControlBlock::default();
         control_block.rip = entry as u64;
-        control_block.rsp = (stack.0 + stack_size) as u64;
         control_block.rflags = 0x202;
         control_block.cr3 = mm::kernel_task_cr3();
+
+        let stack_top = (stack.0 + stack_size) as u64;
+        control_block.stack = stack_top;
+        control_block.kernel_stack = stack_top;
 
         control_block.cs = 0x08;
         control_block.ss = 0x10;
@@ -208,6 +214,17 @@ impl Task {
             }
         }
 
+        // TODO(patrik): This code need big refactoring and do over
+        //   - Find a better stack address for a task
+        //   - If we where a kernel task before and now we are replacing the image to be a
+        //     user task when we maybe could reuse the stack from that kernel task
+        //     to be this processes kernel stack
+
+        let kernel_stack_size = PAGE_SIZE * 2;
+        let kernel_stack = mm::allocate_kernel_vm_zero(format!("{}: Kernel Stack", self.name),
+                                                       kernel_stack_size)
+            .expect("Failed to allocate kernel stack");
+
         // TODO(patrik): Change the stack start
         // TODO(patrik): What should the initial stack size be
         let stack_start = VirtualAddress(0x0000700000000000);
@@ -222,8 +239,13 @@ impl Task {
             core::ptr::write_bytes(stack_start.0 as *mut u8, 0, stack_size);
         }
 
-        // Set the rsp register to the stack we allocated
-        self.control_block.rsp = (stack_start.0 + stack_size) as u64;
+        let user_stack_top = (stack_start.0 + stack_size) as u64;
+        let kernel_stack_top = (kernel_stack.0 + kernel_stack_size) as u64;
+
+        // Setup the stacks for this task
+        self.control_block.stack = user_stack_top;
+        self.control_block.kernel_stack = kernel_stack_top;
+
         // Set the rip register to the elf entry
         self.control_block.rip = elf.entry();
         self.control_block.cr3 = memory_space.page_table().addr().0 as u64;
@@ -247,8 +269,18 @@ impl Task {
         self.control_block
     }
 
-    pub fn set_control_block(&mut self, control_block: ControlBlock) {
-        self.control_block = control_block;
+    pub fn update_control_block(&mut self, register_state: RegisterState) {
+        self.control_block.regs = register_state.regs;
+
+        self.control_block.rip = register_state.rip;
+        self.control_block.stack = register_state.rsp;
+        self.control_block.rflags = register_state.rflags;
+        self.control_block.cr3 = register_state.cr3;
+
+        self.control_block.cs = register_state.cs;
+        self.control_block.ss = register_state.ss;
+        self.control_block.ds = register_state.ds;
+        self.control_block.es = register_state.es;
     }
 
     pub fn add_memory_space_region(&mut self,

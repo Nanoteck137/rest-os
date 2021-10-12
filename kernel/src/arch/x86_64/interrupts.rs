@@ -5,9 +5,7 @@
 
 use crate::mm;
 use crate::mm::VirtualAddress;
-use crate::scheduler::Scheduler;
-
-use crate::process::ControlBlock;
+use crate::scheduler::{ Scheduler, RegisterState };
 
 use super::Regs;
 
@@ -142,27 +140,31 @@ unsafe extern fn interrupt_handler(number: u8,
             let es: u16;
             asm!("mov ax, es", out("ax") es);
 
-            let mut control_block = ControlBlock::default();
-            control_block.regs = *regs;
-            control_block.rip = frame.rip;
-            control_block.rsp = frame.rsp;
-            control_block.rflags = frame.rflags;
-            control_block.cr3 = super::read_cr3();
+            let mut register_state = RegisterState::default();
+            register_state.regs = *regs;
+            register_state.rip = frame.rip;
+            register_state.rsp = frame.rsp;
+            register_state.rflags = frame.rflags;
+            register_state.cr3 = super::read_cr3();
 
-            control_block.cs = frame.cs;
-            control_block.ss = frame.ss;
-            control_block.ds = ds as u64;
-            control_block.es = es as u64;
+            register_state.cs = frame.cs;
+            register_state.ss = frame.ss;
+            register_state.ds = ds as u64;
+            register_state.es = es as u64;
 
             if let Some(control_block) =
-                core!().scheduler().tick(control_block)
+                core!().scheduler().tick(register_state)
             {
                 *regs = control_block.regs;
-                frame.rip = control_block.rip;
+                frame.rip = control_block.stack;
                 frame.rflags = control_block.rflags;
-                frame.rsp = control_block.rsp;
+                frame.rsp = control_block.stack;
                 frame.cs = control_block.cs;
                 frame.ss = control_block.ss;
+
+                let rsp: u64;
+                asm!("mov {}, rsp", out(reg) rsp);
+                println!("Stack: {:#x}", rsp);
 
                 if frame.rip == 0xffffffff80198c73 {
                     println!("Dafaq");

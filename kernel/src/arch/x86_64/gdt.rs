@@ -22,6 +22,12 @@ pub struct TSS {
     iopb_offset: u16,
 }
 
+impl TSS {
+    pub(super) fn set_kernel_stack(&mut self, kernel_stack: u64) {
+        self.rsp[0] = kernel_stack;
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct TSSEntry {
@@ -80,6 +86,7 @@ extern "C" {
 
 static CRITICAL_STACK: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 static NORMAL_STACK:   [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
+static TEST_STACK:     [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 
 pub(super) fn initialize() {
     assert!(core!().arch().gdt.is_none(),
@@ -88,6 +95,7 @@ pub(super) fn initialize() {
             "TSS Already initalized for this core: {}", core!().core_id());
 
     let mut tss = Box::new(TSS::default());
+    tss.rsp[0] = TEST_STACK.as_ptr() as u64 + TEST_STACK.len() as u64;
     tss.ist[0] = CRITICAL_STACK.as_ptr() as u64 + CRITICAL_STACK.len() as u64;
     tss.ist[1] = NORMAL_STACK.as_ptr() as u64 + NORMAL_STACK.len() as u64;
 
