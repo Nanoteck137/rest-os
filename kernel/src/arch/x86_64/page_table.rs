@@ -8,8 +8,7 @@
 
 use crate::mm::{ VirtualAddress, PhysicalAddress, PhysicalMemory, Frame };
 use crate::mm::{ FrameAllocator, PAGE_SIZE };
-
-use crate::process::MemoryRegionFlags;
+use crate::mm::MemoryRegionFlags;
 
 use core::convert::TryFrom;
 

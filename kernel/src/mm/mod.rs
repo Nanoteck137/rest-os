@@ -2,12 +2,13 @@ use crate::arch;
 use crate::arch::x86_64::{ PageTable, PageType };
 
 use crate::multiboot::Multiboot;
-use crate::process::{ Task, MemorySpace, MemoryRegionFlags };
+// use crate::process::{ Task, MemorySpace, MemoryRegionFlags };
 
 use core::convert::TryFrom;
 
-use alloc::sync::{ Arc, Weak };
+use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::sync::{ Arc, Weak };
 use alloc::collections::BTreeMap;
 
 use spin::{ Mutex, RwLock, RwLockWriteGuard };
@@ -93,6 +94,67 @@ impl TryFrom<PhysicalAddress> for Frame {
         Ok(Self {
             index: addr.0 / 4096
         })
+    }
+}
+
+bitflags! {
+    pub struct MemoryRegionFlags: u32 {
+        const READ    = 1 << 0;
+        const WRITE   = 1 << 1;
+        const EXECUTE = 1 << 2;
+    }
+}
+
+#[derive(Debug)]
+struct MemoryRegion {
+    addr: VirtualAddress,
+    size: usize,
+    flags: MemoryRegionFlags,
+}
+
+impl MemoryRegion {
+    fn new(addr: VirtualAddress, size: usize, flags: MemoryRegionFlags)
+        -> Self
+    {
+        Self {
+            addr,
+            size,
+            flags
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MemorySpace {
+    regions: Vec<MemoryRegion>,
+    page_table: PageTable,
+}
+
+impl MemorySpace {
+    pub fn new() -> Self {
+        let page_table = create_page_table();
+
+        Self {
+            regions: Vec::new(),
+            page_table,
+        }
+    }
+
+    fn add_region(&mut self,
+                  vaddr: VirtualAddress, size: usize,
+                  flags: MemoryRegionFlags)
+    {
+        // TODO(patrik): Check for overlap
+
+        self.regions.push(MemoryRegion::new(vaddr, size, flags));
+    }
+
+    pub fn page_table(&self) -> &PageTable {
+        &self.page_table
+    }
+
+    pub fn page_table_mut(&mut self) -> &mut PageTable {
+        &mut self.page_table
     }
 }
 
@@ -301,7 +363,8 @@ impl MemoryManager {
         Some(result)
     }
 
-    fn map_in_userspace(&mut self, memory_space: &mut MemorySpace,
+    fn map_in_userspace(&mut self,
+                        memory_space: &mut MemorySpace,
                         vaddr: VirtualAddress, size: usize,
                         flags: MemoryRegionFlags)
         -> Option<()>
@@ -399,10 +462,11 @@ impl MemoryManager {
         // TODO(patrik): Let the page table handle the copying of the entries
         // let page_table = Self::get_current_page_table();
 
-        let task = core!().task();
-        let mut task_lock = task.write();
+        let process = core!().process();
+        let mut process_lock = process.write();
 
-        let mut memory_space = task_lock.memory_space().write();
+        let memory_space = process_lock.memory_space_mut()
+            .expect("Process has no memory space");
         let page_table = memory_space.page_table_mut();
 
         let (start_p4, _, _, _, _) = PageTable::index(VMALLOC_START);

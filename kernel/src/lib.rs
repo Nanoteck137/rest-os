@@ -69,6 +69,7 @@ mod arch;
 mod util;
 mod multiboot;
 mod mm;
+mod thread;
 mod process;
 mod scheduler;
 mod cpio;
@@ -89,8 +90,8 @@ use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::{ Allocator, BitmapFrameAllocator };
 use mm::{ BOOT_PHYSICAL_MEMORY, KERNEL_PHYSICAL_MEMORY };
 use multiboot::{ Multiboot, Tag};
-// use process::{ Thread, Process };
-use process::Task;
+use process::{ Process };
+// use process::Task;
 use scheduler::Scheduler;
 use cpio::{ CPIO, CPIOKind };
 use elf::{ Elf, ProgramHeaderType };
@@ -283,7 +284,7 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
     Some(data)
 }
 
-fn kernel_test_task() {
+fn kernel_test_thread() {
     loop {}
 }
 
@@ -387,6 +388,15 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     use alloc::borrow::ToOwned;
 
+    let init_process = Process::create_kernel("Kernel Init".to_owned(),
+                                              kernel_init_thread);
+
+    Scheduler::add_process(init_process);
+
+    let test_process = Process::create_kernel("Test Process".to_owned(),
+                                              kernel_test_thread);
+    Scheduler::add_process(test_process);
+    /*
     let task = Task::create_kernel_task("Kernel Init".to_owned(),
                                         kernel_init_thread);
 
@@ -395,12 +405,13 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     let task = Task::create_kernel_task("Test Task".to_owned(),
                                         kernel_test_task);
     Scheduler::add_task(task);
+    */
 
-    Scheduler::debug_dump_tasks();
+    Scheduler::debug_dump();
 
     unsafe {
-        core!().scheduler().force_next();
-    }
+        core!().scheduler().start();
+    };
 }
 
 use alloc::boxed::Box;
@@ -433,7 +444,8 @@ fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
     // println!("Current Process: {:#x?}", core!().process());
 
-    println!("Current Task: {:#x?}", core!().task());
+    println!("Current Process: {:#x?}", core!().process());
+    println!("Current Thread: {:#x?}", core!().thread());
 
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -476,7 +488,11 @@ fn kernel_init_thread() {
 
     // let file = fs::open("/init");
     // let data = fs::read(file);
-    process::replace_image_exec(String::from("init"));
+    unsafe {
+        process::replace_image_exec(String::from("init"));
+    }
+
+    loop {}
 }
 
 #[panic_handler]

@@ -5,7 +5,8 @@
 
 use crate::mm;
 use crate::mm::VirtualAddress;
-use crate::scheduler::{ Scheduler, RegisterState };
+// use crate::scheduler::{ Scheduler, RegisterState };
+use crate::thread::ThreadRegisterState;
 
 use super::Regs;
 
@@ -100,7 +101,7 @@ unsafe extern fn interrupt_handler(number: u8,
     // println!("Frame: {:#x?}", frame);
 
     // Check if we came from userspace if so swap the gs base
-    let mut has_kernel_gs = frame.cs & 0b11 != 0b11;
+    let has_kernel_gs = frame.cs & 0b11 != 0b11;
     if !has_kernel_gs {
         asm!("swapgs");
     }
@@ -135,6 +136,66 @@ unsafe extern fn interrupt_handler(number: u8,
         if number == 32 {
             print!(".");
 
+            let mut old_register_state = ThreadRegisterState::default();
+            old_register_state.r15 = regs.r15;
+            old_register_state.r14 = regs.r14;
+            old_register_state.r13 = regs.r13;
+            old_register_state.r12 = regs.r12;
+            old_register_state.r11 = regs.r11;
+            old_register_state.r10 = regs.r10;
+            old_register_state.r9 = regs.r9;
+            old_register_state.r8 = regs.r8;
+            old_register_state.rbp = regs.rbp;
+            old_register_state.rdi = regs.rdi;
+            old_register_state.rsi = regs.rsi;
+            old_register_state.rdx = regs.rdx;
+            old_register_state.rcx = regs.rcx;
+            old_register_state.rbx = regs.rbx;
+            old_register_state.rax = regs.rax;
+
+            old_register_state.rip = frame.rip;
+            old_register_state.cs = frame.cs;
+            old_register_state.rflags = frame.rflags;
+            old_register_state.rsp = frame.rsp;
+            old_register_state.ss = frame.ss;
+
+            if let Some((new_thread, cr3)) = core!().scheduler()
+                    .schedule(old_register_state)
+            {
+                let thread_lock = new_thread.read();
+                let new_thread_regs = thread_lock.registers();
+
+                regs.r15 = new_thread_regs.r15;
+                regs.r14 = new_thread_regs.r14;
+                regs.r13 = new_thread_regs.r13;
+                regs.r12 = new_thread_regs.r12;
+                regs.r11 = new_thread_regs.r11;
+                regs.r10 = new_thread_regs.r10;
+                regs.r9 = new_thread_regs.r9;
+                regs.r8 = new_thread_regs.r8;
+                regs.rbp = new_thread_regs.rbp;
+                regs.rdi = new_thread_regs.rdi;
+                regs.rsi = new_thread_regs.rsi;
+                regs.rdx = new_thread_regs.rdx;
+                regs.rcx = new_thread_regs.rcx;
+                regs.rbx = new_thread_regs.rbx;
+                regs.rax = new_thread_regs.rax;
+
+                frame.rip = new_thread_regs.rip;
+                frame.cs = new_thread_regs.cs;
+                frame.rflags = new_thread_regs.rflags;
+                frame.rsp = new_thread_regs.rsp;
+                frame.ss = new_thread_regs.ss;
+
+                core!().arch()
+                    .set_kernel_stack(thread_lock.kernel_stack_top().0 as u64);
+
+                asm!("mov cr3, {}", in(reg) cr3);
+
+                need_swap = frame.cs & 0x11 == 0x11;
+            }
+
+            /*
             let ds: u16;
             asm!("mov ax, ds", out("ax") ds);
             let es: u16;
@@ -185,6 +246,7 @@ unsafe extern fn interrupt_handler(number: u8,
 
                 println!("Hello?");
             }
+                */
 
             //if let Some((control_block, is_kernel)) = core!().scheduler().next() {
                 // The control block needs to have infomation about where

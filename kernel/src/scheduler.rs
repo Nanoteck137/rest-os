@@ -1,53 +1,43 @@
-//! Module to schedule processes and threads
-
-use crate::arch::x86_64::Regs;
-
 use crate::mm;
-use crate::mm::{ VirtualAddress, PAGE_SIZE };
-//use crate::process::{ Process, Thread, ThreadState, ThreadControlBlock };
-use crate::process::{ Task, ControlBlock };
-use crate::elf::{ Elf, ProgramHeaderType };
+use crate::process::{ Process, ProcessHandle };
+use crate::thread::{ ThreadHandle, ThreadRegisterState };
 
 use alloc::collections::LinkedList;
 use alloc::sync::Arc;
-use alloc::string::String;
+use alloc::vec::Vec;
+
 use spin::{ Mutex, RwLock };
 
-// static PROCESSES: Mutex<Vec<Arc<RwLock<Process>>>> = Mutex::new(Vec::new());
-// TODO(patrik): Replace mutex with a mutex thats disables interrupts?
-static TASKS: Mutex<LinkedList<Arc<RwLock<Task>>>> =
+static PROCESSES: Mutex<Vec<ProcessHandle>> = Mutex::new(Vec::new());
+static THREAD_QUEUE: Mutex<LinkedList<ThreadHandle>> =
     Mutex::new(LinkedList::new());
 
-#[derive(Copy, Clone, Default, Debug)]
-#[repr(C, packed)]
-pub struct RegisterState {
-    pub regs: Regs,
-    pub rip:    u64, // 0x78
-    pub rsp:    u64, // 0x80
-    pub rflags: u64, // 0x88
-    pub cr3:    u64, // 0x90
-    pub cs:     u64, // 0x98
-    pub ss:     u64, // 0xA0
-    pub ds:     u64, // 0xA8
-    pub es:     u64, // 0xB0
+extern "C" {
+    fn switch_thread(register_state: &ThreadRegisterState,
+                     page_table_addr: usize) -> !;
 }
 
-extern "C" {
-    // fn switch_to_userspace(control_block: &ControlBlock);
-    // fn switch_to_kernel(control_block: &ControlBlock);
-    fn do_context_switch(register_state: &RegisterState) -> !;
+fn idle_thread() {
+    loop {
+        println!("Idle Thread");
+    }
 }
 
 pub struct Scheduler {
-    current_task: Option<Arc<RwLock<Task>>>,
+    idle_process: ProcessHandle,
     ready: bool,
+
+    current_thread: Option<ThreadHandle>,
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
+    pub fn new(core_id: usize) -> Self {
+        let idle_process = Process::create_idle(core_id, idle_thread);
+
         Self {
-            current_task: None,
+            idle_process,
             ready: false,
+            current_thread: None,
         }
     }
 
@@ -55,264 +45,169 @@ impl Scheduler {
         self.ready = true;
     }
 
-    pub unsafe fn tick(&mut self, register_state: RegisterState)
-        -> Option<ControlBlock>
+    pub unsafe fn start(&mut self) -> ! {
+        // TODO(patrik): Context switch
+
+        // let new_thread = self.schedule();
+
+        assert!(self.current_thread.is_none(),
+                "Scheduler: current thread should be none");
+
+        let new_thread = {
+            let mut thread_queue_lock = THREAD_QUEUE.lock();
+            thread_queue_lock.pop_front()
+                .expect("No init process created?")
+        };
+
+        let register_state = new_thread.read().registers();
+        let page_table_addr = mm::kernel_task_cr3() as usize;
+
+        self.current_thread = Some(new_thread);
+
+        switch_thread(&register_state, page_table_addr);
+    }
+
+    pub fn schedule(&mut self, register_state: ThreadRegisterState)
+        -> Option<(ThreadHandle, u64)>
     {
         if !self.ready {
             return None;
         }
 
-        let control_block = core!().without_interrupts(|| {
+        let mut thread_queue_lock = THREAD_QUEUE.lock();
+
+        if let Some(thread) = self.current_thread.take() {
+            // TODO(patrik): Set thread state
             {
-                core!().task().write().update_control_block(register_state);
+                let mut thread_lock = thread.write();
+
+                if thread_lock.update() {
+                    thread_lock.set_registers(register_state);
+                } else {
+                    thread_lock.set_update(true);
+                }
             }
-            let control_block = self.next_when_ready(self.ready);
-
-            control_block
-        });
-
-        control_block
-    }
-
-    pub unsafe fn force_next(&mut self) -> ! {
-        let control_block = self.next_when_ready(true)
-            .unwrap();
-
-        // TODO(patrik): This should check if we are switching to
-        // kernel or userspace
-        if control_block.cs & 3 == 3 {
-            asm!("swapgs");
+            thread_queue_lock.push_back(thread);
         }
 
-        // TODO(patrik): Check Task::flags to see if we should switch to
-        // kernel or userspace
-        self.context_switch(control_block);
-    }
+        let new_thread = thread_queue_lock.pop_front()
+            .expect("Failed to pop_front");
 
-    pub unsafe fn next(&mut self) -> ! {
-        let control_block = self.next_when_ready(self.ready)
-            .unwrap();
+        let parent = new_thread.read().parent().upgrade()
+            .expect("Thread no parent?");
+        let parent_lock = parent.read();
 
-        // TODO(patrik): This should check if we are switching to
-        // kernel or userspace
-        if control_block.cs & 3 == 3 {
-            asm!("swapgs");
-        }
+        println!("Picking new thread from process: {}", parent_lock.name());
 
-        // TODO(patrik): Check Task::flags to see if we should switch to
-        // kernel or userspace
-        self.context_switch(control_block);
-    }
+        // TODO(patrik): Set thread state
 
-    unsafe fn next_when_ready(&mut self, ready: bool)
-        -> Option<ControlBlock>
-    {
-        if !ready {
-            return None;
-        }
-
-        println!("Picking next");
-
-        let control_block = core!().without_interrupts(|| {
-            let mut lock = TASKS.lock();
-
-            // Push back the task we currently are executing
-            if let Some(task) = self.current_task.take() {
-                // TODO(patrik): Check if the task is runnable
-                lock.push_back(task);
+        let cr3 = {
+            if let Some(memory_space) = parent_lock.memory_space() {
+                memory_space.page_table().addr().0 as u64
+            } else if parent_lock.kernel() {
+                mm::kernel_task_cr3()
+            } else {
+                panic!("Can't find cr3 for thread");
             }
+        };
 
-            let task = lock.pop_front()
-                .expect("Failed to pop_front");
+        self.current_thread = Some(new_thread.clone());
 
-            self.current_task = Some(task.clone());
-
-            let task = task.read();
-
-            // TODO(patrik): Set task state to running
-
-            let control_block = task.control_block();
-            println!("Picking next: {}", task.name());
-
-            control_block
-        });
-
-        println!("Control Block: {:#x?}", control_block);
-
-        Some(control_block)
+        Some((new_thread, cr3))
     }
 
-    pub unsafe fn exec(&mut self) -> ! {
-        let control_block = core!().without_interrupts(|| {
-            let task = self.current_task();
-            let control_block = task.read().control_block();
+    pub unsafe fn exec(&self) -> ! {
+        let (registers, cr3) = {
+            let thread = core!().thread();
+            let thread_lock = thread.read();
 
-            control_block
-        });
+            let parent = core!().process();
+            let parent_lock = parent.read();
 
-        if control_block.cs & 3 == 3 {
-            asm!("swapgs");
+            let registers = thread_lock.registers();
+            let cr3 = {
+                if let Some(memory_space) = parent_lock.memory_space() {
+                    memory_space.page_table().addr().0
+                } else if parent_lock.kernel() {
+                    mm::kernel_task_cr3() as usize
+                } else {
+                    panic!("Can't find cr3 for thread");
+                }
+            };
+
+            (registers, cr3)
+        };
+
+        switch_thread(&registers, cr3);
+    }
+
+    pub fn add_process(process: ProcessHandle) {
+        let mut process_list_lock = PROCESSES.lock();
+        let mut thread_queue_lock = THREAD_QUEUE.lock();
+
+        {
+            for thread in process.read().threads().iter() {
+                thread_queue_lock.push_back(thread.clone());
+            }
         }
 
-        self.context_switch(control_block);
+        process_list_lock.push(process);
     }
 
-    pub unsafe fn context_switch(&mut self, control_block: ControlBlock) -> ! {
-        core!().arch().set_kernel_stack(control_block.kernel_stack);
+    pub fn debug_dump() {
+        let process_list_lock = PROCESSES.lock();
+        let thread_queue_lock = THREAD_QUEUE.lock();
 
-        let mut register_state = RegisterState::default();
-        register_state.regs = control_block.regs;
-        register_state.rip = control_block.rip;
-        register_state.rsp = control_block.stack;
-        register_state.rflags = control_block.rflags;
-        register_state.cr3 = control_block.cr3;
-        register_state.cs = control_block.cs;
-        register_state.ss = control_block.ss;
-        register_state.ds = control_block.ds;
-        register_state.es = control_block.es;
-
-        do_context_switch(&register_state);
-    }
-
-    pub fn current_task(&mut self) -> Arc<RwLock<Task>> {
-        // TODO(patrik): Remove 'unwrap'
-        self.current_task.as_ref().unwrap().clone()
-    }
-
-    pub fn add_task(task: Task) {
-        TASKS.lock().push_back(Arc::new(RwLock::new(task)));
-    }
-
-    pub fn debug_dump_tasks() {
-        let lock = TASKS.lock();
-
-        println!("----------------");
-
-        for task in lock.iter() {
-            let task = task.read();
-            println!("Task - {}:{}", task.pid(), task.name());
+        println!("-------------- PROCESSES --------------");
+        for process in process_list_lock.iter() {
+            println!("  - {}", process.read().name());
         }
+        println!("---------------------------------------");
 
-        println!("----------------");
+        println!("-------------- THREAD QUEUE --------------");
+        for thread in thread_queue_lock.iter() {
+            let thread_lock = thread.read();
+            let parent = thread_lock.parent().upgrade()
+                .expect("Thread without parent");
+            let parent_lock = parent.read();
+            println!("  - #{} '{}'", thread_lock.id(), parent_lock.name());
+
+            // println!("Thread: {:#x?}", thread);
+        }
+        println!("------------------------------------------");
+    }
+
+    pub fn current_thread(&self) -> ThreadHandle {
+        // TODO(patrik): Remove expect
+        self.current_thread.as_ref()
+            .expect("No thread assigned")
+                .clone()
     }
 }
 
 global_asm!(r#"
-.global do_context_switch
-do_context_switch:
-    cli
+switch_thread:
+    mov rsp, rdi
+    mov rax, rsi
 
-    mov rax, QWORD PTR [rdi + 0xA8]
-    mov ds, ax
-    mov rax, QWORD PTR [rdi + 0xB0]
-    mov es, ax
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
 
-    // Setup the iretq frame
-    push QWORD PTR [rdi + 0xA0] // Stack segment
-    push QWORD PTR [rdi + 0x80] // RSP
-    push QWORD PTR [rdi + 0x88] // RFLAGS
-    push QWORD PTR [rdi + 0x98] // Code segment
-    push QWORD PTR [rdi + 0x78] // RIP
-
-    // Setup the cr3 register
-    mov rax, QWORD PTR [rdi + 0x90]
     mov cr3, rax
 
-    mov r15, QWORD PTR [rdi + 0x00]
-    mov r14, QWORD PTR [rdi + 0x08]
-    mov r13, QWORD PTR [rdi + 0x10]
-    mov r12, QWORD PTR [rdi + 0x18]
-    mov r11, QWORD PTR [rdi + 0x20]
-    mov r10, QWORD PTR [rdi + 0x28]
-    mov r9,  QWORD PTR [rdi + 0x30]
-    mov r8,  QWORD PTR [rdi + 0x38]
-    mov rbp, QWORD PTR [rdi + 0x40]
-    // mov rdi, QWORD PTR [rdi + 0x48]
-    mov rsi, QWORD PTR [rdi + 0x50]
-    mov rdx, QWORD PTR [rdi + 0x58]
-    mov rcx, QWORD PTR [rdi + 0x60]
-    mov rbx, QWORD PTR [rdi + 0x68]
-    mov rax, QWORD PTR [rdi + 0x70]
-
-    // Now we can set push the value RDI needs
-    push QWORD PTR [rdi + 0x48]
-    // Pop the value to set RDI
-    pop rdi
+    pop rax
 
     iretq
-
-// rdi - Control Block
-switch_to_userspace:
-    mov ax, 0x28 | 3
-    mov ds, ax
-    mov es, ax
-
-    // Setup the iretq frame
-    push 0x28 | 3
-    // RSP
-    push QWORD PTR [rdi + 0x80]
-    push QWORD PTR 0x202
-    push 0x30 | 3
-    // RIP
-    push QWORD PTR [rdi + 0x78]
-
-    // Setup the cr3 register
-    mov rax, QWORD PTR [rdi + 0x88]
-    mov cr3, rax
-
-    mov r15, QWORD PTR [rdi + 0x00]
-    mov r14, QWORD PTR [rdi + 0x08]
-    mov r13, QWORD PTR [rdi + 0x10]
-    mov r12, QWORD PTR [rdi + 0x18]
-    mov r11, QWORD PTR [rdi + 0x20]
-    mov r10, QWORD PTR [rdi + 0x28]
-    mov r9,  QWORD PTR [rdi + 0x30]
-    mov r8,  QWORD PTR [rdi + 0x38]
-    mov rbp, QWORD PTR [rdi + 0x40]
-    // mov rdi, QWORD PTR [rdi + 0x48]
-    mov rsi, QWORD PTR [rdi + 0x50]
-    mov rdx, QWORD PTR [rdi + 0x58]
-    mov rcx, QWORD PTR [rdi + 0x60]
-    mov rbx, QWORD PTR [rdi + 0x68]
-    mov rax, QWORD PTR [rdi + 0x70]
-
-    // Now we can set push the value RDI needs
-    push QWORD PTR [rdi + 0x48]
-    // Pop the value to set RDI
-    pop rdi
-
-    // Swap the gs to the user gs is used insteed of the kernel gs
-    swapgs
-
-    iretq
-
-.global switch_to_kernel
-switch_to_kernel:
-    mov rsp, QWORD PTR [rdi + 0x80]
-
-    mov r15, QWORD PTR [rdi + 0x00]
-    mov r14, QWORD PTR [rdi + 0x08]
-    mov r13, QWORD PTR [rdi + 0x10]
-    mov r12, QWORD PTR [rdi + 0x18]
-    mov r11, QWORD PTR [rdi + 0x20]
-    mov r10, QWORD PTR [rdi + 0x28]
-    mov r9,  QWORD PTR [rdi + 0x30]
-    mov r8,  QWORD PTR [rdi + 0x38]
-    mov rbp, QWORD PTR [rdi + 0x40]
-    // mov rdi, QWORD PTR [rdi + 0x48]
-    mov rsi, QWORD PTR [rdi + 0x50]
-    mov rdx, QWORD PTR [rdi + 0x58]
-    mov rcx, QWORD PTR [rdi + 0x60]
-    mov rbx, QWORD PTR [rdi + 0x68]
-    mov rax, QWORD PTR [rdi + 0x70]
-
-    // Push the rip
-    push QWORD PTR [rdi + 0x78]
-
-    // Now we can set push the value RDI needs
-    push QWORD PTR [rdi + 0x48]
-    // Pop the value to set RDI
-    pop rdi
-
-    ret
 "#);

@@ -7,8 +7,9 @@ use crate::arch;
 use crate::arch::ArchInfo;
 use crate::arch::x86_64::PageTable;
 use crate::scheduler::Scheduler;
-// use crate::process::Process;
-use crate::process::Task;
+use crate::process::ProcessHandle;
+use crate::thread::ThreadHandle;
+// use crate::process::Task;
 use crate::util::{ AutoAtomicRef, AutoAtomicRefGuard };
 
 use alloc::string::String;
@@ -54,17 +55,23 @@ impl ProcessorInfo {
         &mut self.arch
     }
 
-    pub fn page_table(&self) -> PageTable {
-        let cr3 = unsafe { arch::x86_64::read_cr3() };
-
-        let page_table =
-            unsafe { PageTable::from_table(PhysicalAddress(cr3 as usize)) };
-
-        page_table
+    pub fn thread(&self) -> ThreadHandle {
+        self.scheduler.current_thread()
     }
 
-    pub fn task(&mut self) -> Arc<RwLock<Task>> {
-        self.scheduler.current_task()
+    pub fn process(&self) -> ProcessHandle {
+        let thread = self.thread();
+        let thread_lock = thread.read();
+
+        // TODO(patrik): Remove expect
+        thread_lock.parent().upgrade()
+            .expect("Current thread no parent")
+    }
+
+    pub unsafe fn page_table(&self) -> PageTable {
+        let cr3 = arch::x86_64::read_cr3();
+
+        PageTable::from_table(PhysicalAddress(cr3 as usize))
     }
 
     pub unsafe fn enter_interrupt(&self) -> AutoAtomicRefGuard {
@@ -158,7 +165,7 @@ pub fn init(core_id: u32)
 
         arch: ArchInfo::new(),
 
-        scheduler: Scheduler::new(),
+        scheduler: Scheduler::new(core_id as usize),
     };
 
     unsafe {
