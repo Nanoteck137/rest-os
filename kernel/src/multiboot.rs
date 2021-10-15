@@ -26,8 +26,8 @@ pub enum Tag<'a> {
     MemoryMap(MemoryMap<'a>),
     Framebuffer(Framebuffer),
     ElfSections(ElfSections<'a>),
-    Acpi1(usize),
-    Acpi2(usize),
+    Acpi1(PhysicalAddress),
+    Acpi2(PhysicalAddress, usize),
     LoadBaseAddr(usize),
     Unknown(u32),
 }
@@ -693,14 +693,40 @@ impl<'a> Iterator for TagIter<'a> {
                 let addr = u32::from_le_bytes(
                     self.bytes[start + 16..start + 20].try_into().ok()?);
 
-                let addr = addr as usize;
+                let addr = PhysicalAddress(addr as usize);
                 Tag::Acpi1(addr)
             }
 
             15 => {
                 // MULTIBOOT_TAG_TYPE_ACPI_NEW
 
-                panic!("Implement ACPI 2.0 support");
+                let start = self.offset + 8;
+                let sig = &self.bytes[start..start + 8];
+                assert!(sig == b"RSD PTR ", "Wrong ACPI signature");
+
+                // TODO(patrik): Check the checksum
+
+                let _checksum = self.bytes[start + 8];
+                let _oem_id = &self.bytes[start + 9..start + 14];
+                let revision = self.bytes[start + 15];
+                assert!(revision == 2,
+                        "Revision should be 0 when ACPI 1.0 is used");
+
+                let _rsdt_addr = u32::from_le_bytes(
+                    self.bytes[start + 16..start + 20].try_into().ok()?);
+
+                let length = u32::from_le_bytes(
+                    self.bytes[start + 20..start + 24].try_into().ok()?);
+
+                let xsdt_addr = u64::from_le_bytes(
+                    self.bytes[start + 24..start + 28].try_into().ok()?);
+
+                let _exteneded_checksum = u8::from_le_bytes(
+                    self.bytes[start + 28..start + 29].try_into().ok()?);
+
+                let addr = PhysicalAddress(xsdt_addr as usize);
+                let length = length as usize;
+                Tag::Acpi2(addr, length)
             }
 
             21 => {

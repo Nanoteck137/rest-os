@@ -220,10 +220,10 @@ fn _display_multiboot_tags(multiboot: &Multiboot) {
             }
 
             Tag::Acpi1(addr) =>
-                println!("ACPI 1.0: {:#x}", addr),
+                println!("ACPI 1.0: {:?}", addr),
 
-            Tag::Acpi2(addr) =>
-                println!("ACPI 2.0: {:#x}", addr),
+            Tag::Acpi2(addr, length) =>
+                println!("ACPI 2.0: {:?} - {}", addr, length),
 
             Tag::LoadBaseAddr(addr) =>
                 println!("Load Base Addr: {:#x}", addr),
@@ -285,7 +285,9 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
 }
 
 fn kernel_test_thread() {
-    loop {}
+    loop {
+        println!("Kernel Test thread");
+    }
 }
 
 #[no_mangle]
@@ -311,7 +313,7 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
-    // _display_multiboot_tags(&multiboot);
+    _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);
@@ -342,6 +344,8 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     print::switch_early_print();
     print::console_init();
     print::flush_early_print_buffer();
+
+    panic!();
 
     arch::initialize();
 
