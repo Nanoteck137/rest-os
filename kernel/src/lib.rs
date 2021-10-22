@@ -74,6 +74,7 @@ mod process;
 mod scheduler;
 mod cpio;
 mod elf;
+mod acpi;
 
 use core::panic::PanicInfo;
 use core::alloc::Layout;
@@ -286,7 +287,7 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
 
 fn kernel_test_thread() {
     loop {
-        println!("Kernel Test thread");
+        // println!("Kernel Test thread");
     }
 }
 
@@ -306,8 +307,8 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // Initialize the kernel heap
     initialize_heap();
-
     // Get access to the multiboot structure
+
     let multiboot = unsafe {
         Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
                              PhysicalAddress(multiboot_addr))
@@ -345,11 +346,10 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     print::console_init();
     print::flush_early_print_buffer();
 
-    panic!();
-
+    acpi::initialize(&multiboot);
     arch::initialize();
 
-    arch::x86_64::pic::enable(0x0001);
+    acpi::debug_dump();
 
     unsafe {
         core!().enable_interrupts();
@@ -400,16 +400,6 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     let test_process = Process::create_kernel("Test Process".to_owned(),
                                               kernel_test_thread);
     Scheduler::add_process(test_process);
-    /*
-    let task = Task::create_kernel_task("Kernel Init".to_owned(),
-                                        kernel_init_thread);
-
-    Scheduler::add_task(task);
-
-    let task = Task::create_kernel_task("Test Task".to_owned(),
-                                        kernel_test_task);
-    Scheduler::add_task(task);
-    */
 
     Scheduler::debug_dump();
 
@@ -502,7 +492,7 @@ fn kernel_init_thread() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        arch::x86_64::pic::disable();
+        // arch::x86_64::pic::disable();
         arch::force_disable_interrupts();
     }
 

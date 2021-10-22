@@ -79,7 +79,7 @@ fn _start() -> ! {
     println!("Syscall Result: {:?}", res);
 
     loop {
-        println!("Init Process");
+        // println!("Init Process");
     }
 }
 

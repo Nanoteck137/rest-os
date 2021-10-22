@@ -66,6 +66,14 @@ impl core::ops::Add<usize> for VirtualAddress {
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub struct PhysicalAddress(pub usize);
 
+impl core::ops::Add<usize> for PhysicalAddress {
+    type Output = PhysicalAddress;
+
+    fn add(self, rhs: usize) -> PhysicalAddress {
+        PhysicalAddress(self.0 + rhs)
+    }
+}
+
 impl From<Frame> for PhysicalAddress {
     fn from(value: Frame) -> Self {
         Self(value.index * PAGE_SIZE)

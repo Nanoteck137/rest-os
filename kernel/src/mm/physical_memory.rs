@@ -10,6 +10,9 @@ pub trait PhysicalMemory
     // Read from physical memory
     unsafe fn read<T>(&self, paddr: PhysicalAddress) -> T;
 
+    // Read from physical memory at paddr (can be unalinged)
+    unsafe fn read_unaligned<T>(&self, paddr: PhysicalAddress) -> T;
+
     // Write to physical memory
     unsafe fn write<T>(&self, paddr: PhysicalAddress, value: T);
 
@@ -44,6 +47,17 @@ impl PhysicalMemory for BootPhysicalMemory {
 
         let new_addr = paddr.0 + KERNEL_TEXT_START.0;
         core::ptr::read_volatile(new_addr as *const T)
+    }
+
+    // Read from physical memory at paddr (can be unalinged)
+    unsafe fn read_unaligned<T>(&self, paddr: PhysicalAddress) -> T {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
+            KERNEL_TEXT_START.0;
+        assert!(end <= KERNEL_TEXT_END.0,
+                "Reading address '{:?}' is over the kernel text area", paddr);
+
+        let new_addr = paddr.0 + KERNEL_TEXT_START.0;
+        core::ptr::read_unaligned(new_addr as *const T)
     }
 
     // Write to physical memory
@@ -106,6 +120,18 @@ impl PhysicalMemory for KernelPhysicalMemory {
 
         let new_addr = paddr.0 + PHYSICAL_MEMORY_START.0;
         core::ptr::read_volatile(new_addr as *const T)
+    }
+
+    // Read from physical memory at paddr (can be unalinged)
+    unsafe fn read_unaligned<T>(&self, paddr: PhysicalAddress) -> T {
+        let end = (paddr.0 + core::mem::size_of::<T>() - 1) +
+            PHYSICAL_MEMORY_START.0;
+        assert!(end < PHYSICAL_MEMORY_END.0,
+                "Reading address '{:?}' is over the physical memory area",
+                paddr);
+
+        let new_addr = paddr.0 + PHYSICAL_MEMORY_START.0;
+        core::ptr::read_unaligned(new_addr as *const T)
     }
 
     // Write to physical memory
