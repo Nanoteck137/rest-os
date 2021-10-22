@@ -314,6 +314,7 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
                              PhysicalAddress(multiboot_addr))
     };
 
+
     _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
@@ -346,7 +347,7 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     print::console_init();
     print::flush_early_print_buffer();
 
-    acpi::initialize(&multiboot);
+    acpi::initialize(&BOOT_PHYSICAL_MEMORY, &multiboot);
     arch::initialize();
 
     acpi::debug_dump();

@@ -3,8 +3,18 @@ use crate::mm::{ PhysicalAddress, PhysicalMemory, KERNEL_PHYSICAL_MEMORY };
 
 static mut ACPI_TABLE: Option<PhysicalAddress> = None;
 
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct Rsdp {
+    signature:         [u8; 8],
+    checksum:          u8,
+    oem_id:            [u8; 6],
+    revision:          u8,
+    rsdt_addr:         u32,
+}
+
 #[derive(Copy, Clone, Debug)]
-#[repr(C)]
+#[repr(C, packed)]
 pub struct SDTHeader {
     signature: [u8; 4],
     length: u32,
@@ -17,7 +27,49 @@ pub struct SDTHeader {
     creator_revision: u32,
 }
 
-pub fn initialize(multiboot: &Multiboot) {
+unsafe fn search_acpi<P>(physical_memory: &P)
+    -> Option<PhysicalAddress>
+    where P: PhysicalMemory
+{
+    let ebda = physical_memory.read::<u16>(PhysicalAddress(0x40e)) as usize;
+    println!("Edba: {:#x?}", ebda);
+
+    let regions = [
+        (ebda, ebda + 1024 - 1),
+
+        (0xe0000, 0xfffff)
+    ];
+
+    // let mut rsdp = None;
+
+    for &(start, end) in &regions {
+        let start = (start + 0xf) & !0xf;
+
+        for paddr in (start..=end).step_by(16) {
+            let struct_end = start + core::mem::size_of::<Rsdp>() - 1;
+
+            if struct_end > end {
+                break;
+            }
+
+            // Read the table
+            let table = physical_memory.read::<Rsdp>(PhysicalAddress(paddr));
+            if &table.signature != b"RSD PTR " {
+                continue;
+            }
+
+            println!("Found table: {:#x?}", table);
+
+            return Some(PhysicalAddress(table.rsdt_addr as usize))
+        }
+    }
+
+    None
+}
+
+pub fn initialize<P>(physical_memory: &P, multiboot: &Multiboot)
+    where P: PhysicalMemory
+{
     let mut acpi_addr = None;
 
     for tag in multiboot.tags() {
@@ -27,6 +79,15 @@ pub fn initialize(multiboot: &Multiboot) {
 
             _ => {},
         }
+    }
+
+    acpi_addr = None;
+
+    if acpi_addr.is_none() {
+        // NOTE(patrik): The bootloader didn't find the ACPI table so
+        // we do a search to find it insteed
+
+        acpi_addr = unsafe { search_acpi(physical_memory) }
     }
 
     unsafe {
