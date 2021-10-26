@@ -97,8 +97,8 @@ impl BitmapRegion {
                 self.bitmap.set_index(i, true);
 
                 let addr = PhysicalAddress(i * 4096 + self.start.0);
-                let frame = Frame::try_from(addr)
-                    .expect("Failed to convert to frame");
+                let frame = Frame::from_paddr(addr);
+
                 return Some(frame);
             }
         }
@@ -107,10 +107,10 @@ impl BitmapRegion {
     }
 
     fn free_frame(&mut self, frame: Frame) {
-        let addr = PhysicalAddress::from(frame);
-        assert!(addr >= self.start_addr() && addr <= self.end_addr());
+        let paddr = frame.paddr();
+        assert!(paddr >= self.start_addr() && paddr <= self.end_addr());
 
-        let addr = addr.0 - self.start.0;
+        let addr = paddr.0 - self.start.0;
         let index = addr / PAGE_SIZE;
 
         self.bitmap.set_index(index, false);
@@ -191,9 +191,9 @@ impl FrameAllocator for BitmapFrameAllocator {
     }
 
     fn free_frame(&mut self, frame: Frame) {
-        let addr = PhysicalAddress::from(frame);
+        let paddr = frame.paddr();
         for region in self.bitmap_regions.iter_mut() {
-            if addr >= region.start_addr() && addr <= region.end_addr() {
+            if paddr >= region.start_addr() && paddr <= region.end_addr() {
                 region.free_frame(frame);
                 return;
             }

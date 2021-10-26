@@ -19,9 +19,12 @@ pub use heap_alloc::Allocator;
 pub use physical_memory::{ PhysicalMemory };
 use physical_memory::{ BootPhysicalMemory, KernelPhysicalMemory };
 
+pub use addr::{ VirtualAddress, PhysicalAddress };
+
 mod heap_alloc;
 mod frame_alloc;
 mod physical_memory;
+mod addr;
 
 pub const PAGE_SIZE: usize = 4096;
 
@@ -46,70 +49,41 @@ pub static BOOT_PHYSICAL_MEMORY: BootPhysicalMemory = BootPhysicalMemory {};
 pub static KERNEL_PHYSICAL_MEMORY: KernelPhysicalMemory =
     KernelPhysicalMemory {};
 
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
-pub struct VirtualAddress(pub usize);
-
-impl core::fmt::Debug for VirtualAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "VirtualAddress({:#x})", self.0)
-    }
-}
-
-impl core::ops::Add<usize> for VirtualAddress {
-    type Output = VirtualAddress;
-
-    fn add(self, rhs: usize) -> VirtualAddress {
-        VirtualAddress(self.0 + rhs)
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
-pub struct PhysicalAddress(pub usize);
-
-impl core::ops::Add<usize> for PhysicalAddress {
-    type Output = PhysicalAddress;
-
-    fn add(self, rhs: usize) -> PhysicalAddress {
-        PhysicalAddress(self.0 + rhs)
-    }
-}
-
-impl From<Frame> for PhysicalAddress {
-    fn from(value: Frame) -> Self {
-        Self(value.index * PAGE_SIZE)
-    }
-}
-
-impl core::fmt::Debug for PhysicalAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "PhysicalAddress({:#x})", self.0)
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Frame {
     index: usize
 }
 
-impl TryFrom<PhysicalAddress> for Frame {
-    type Error = ();
+impl Frame {
+    pub fn from_paddr(paddr: PhysicalAddress) -> Self {
+        let frame = (paddr.0 & !0xfff) / PAGE_SIZE;
 
-    fn try_from(addr: PhysicalAddress) -> Result<Self, Self::Error> {
-        if addr.0 % 4096 != 0 {
-            return Err(());
+        Self {
+            index: frame
         }
+    }
 
-        Ok(Self {
-            index: addr.0 / 4096
-        })
+    pub fn paddr(&self) -> PhysicalAddress {
+        PhysicalAddress(self.index * PAGE_SIZE)
+    }
+}
+
+impl core::ops::Add<usize> for Frame {
+    type Output = Frame;
+
+    fn add(self, rhs: usize) -> Frame {
+        Frame {
+            index: self.index + rhs
+        }
     }
 }
 
 bitflags! {
     pub struct MemoryRegionFlags: u32 {
-        const READ    = 1 << 0;
-        const WRITE   = 1 << 1;
-        const EXECUTE = 1 << 2;
+        const READ          = 1 << 0;
+        const WRITE         = 1 << 1;
+        const EXECUTE       = 1 << 2;
+        const DISABLE_CACHE = 1 << 3;
     }
 }
 
@@ -168,20 +142,75 @@ impl MemorySpace {
 
 #[derive(Debug)]
 pub struct VMRegion {
-    name: String,
-    addr: VirtualAddress,
+    name: Option<String>,
+
+    // pages: Vec<Page>,
+    vaddr: VirtualAddress,
+    paddr: Option<PhysicalAddress>,
     page_count: usize,
+
+    flags: MemoryRegionFlags,
 
     is_mapped: bool,
 }
 
 impl VMRegion {
-    pub fn addr(&self) -> VirtualAddress {
-        self.addr
+    pub fn create_with_paddr(vaddr: VirtualAddress,
+                             paddr: PhysicalAddress,
+                             page_count: usize,
+                             flags: MemoryRegionFlags)
+        -> Self
+    {
+        Self {
+            name: None,
+
+            vaddr,
+            paddr: Some(paddr),
+            page_count,
+
+            flags,
+
+            is_mapped: false,
+        }
+    }
+
+    pub fn create_with_name(name: String,
+                            vaddr: VirtualAddress,
+                            page_count: usize,
+                            flags: MemoryRegionFlags)
+        -> Self
+    {
+        Self {
+            name: Some(name),
+
+            vaddr,
+            paddr: None,
+            page_count,
+
+            flags,
+
+            is_mapped: false,
+        }
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref()
+    }
+
+    pub fn vaddr(&self) -> VirtualAddress {
+        self.vaddr
+    }
+
+    pub fn paddr(&self) -> Option<PhysicalAddress> {
+        self.paddr
     }
 
     pub fn page_count(&self) -> usize {
         self.page_count
+    }
+
+    pub fn flags(&self) -> MemoryRegionFlags {
+        self.flags
     }
 }
 
@@ -347,26 +376,23 @@ impl MemoryManager {
         assert!(size > 0, "Size can't be 0");
         assert!(self.next_addr.0 % PAGE_SIZE == 0);
 
-        let addr = self.next_addr.0;
-        let pages = size / PAGE_SIZE + 1;
+        let vaddr = self.next_addr.0;
+        let page_count = size / PAGE_SIZE + 1;
 
-        self.next_addr.0 += pages * PAGE_SIZE;
+        self.next_addr.0 += page_count * PAGE_SIZE;
 
-        let region = VMRegion {
-            name,
-            addr: VirtualAddress(addr),
-            page_count: pages,
+        let region = VMRegion::create_with_name(name,
+                                                VirtualAddress(vaddr),
+                                                page_count,
+                                                MemoryRegionFlags::READ |
+                                                MemoryRegionFlags::WRITE);
 
-            is_mapped: false,
-        };
-
-        let result = region.addr();
+        let result = region.vaddr();
         let region = Arc::new(RwLock::new(region));
-        self.kernel_regions.insert(addr, region.clone());
+        self.kernel_regions.insert(vaddr, region.clone());
 
         let mut region = region.write();
-        self.map_region(&mut region, MemoryRegionFlags::READ |
-                                     MemoryRegionFlags::WRITE);
+        self.map_region(&mut region);
 
         Some(result)
     }
@@ -392,7 +418,7 @@ impl MemoryManager {
                 page_table.map_raw_user(&mut self.frame_allocator,
                                    &crate::KERNEL_PHYSICAL_MEMORY,
                                    vaddr,
-                                   PhysicalAddress::from(frame),
+                                   frame.paddr(),
                                    PageType::Page4K,
                                    flags)
                     .expect("Failed to map");
@@ -404,6 +430,34 @@ impl MemoryManager {
         Some(())
     }
 
+    fn map_physical_to_kernel_vm(&mut self,
+                                 paddr: PhysicalAddress, size: usize,
+                                 flags: MemoryRegionFlags)
+        -> Option<VirtualAddress>
+    {
+        assert!(size > 0, "Size can't be 0");
+        assert!(self.next_addr.0 % PAGE_SIZE == 0);
+
+        let vaddr = self.next_addr.0;
+        let page_count = size / PAGE_SIZE + 1;
+
+        self.next_addr.0 += page_count * PAGE_SIZE;
+
+        let region = VMRegion::create_with_paddr(VirtualAddress(vaddr),
+                                                 paddr,
+                                                 page_count,
+                                                 flags);
+
+        let result = region.vaddr();
+        let region = Arc::new(RwLock::new(region));
+        self.kernel_regions.insert(vaddr, region.clone());
+
+        let mut region = region.write();
+        self.map_region(&mut region);
+
+        Some(result)
+    }
+
     fn find_region(&mut self, vaddr: VirtualAddress)
         -> Option<Arc<RwLock<VMRegion>>>
     {
@@ -411,10 +465,10 @@ impl MemoryManager {
         for region in self.kernel_regions.values() {
             let lock = region.read();
 
-            let start = lock.addr();
+            let start = lock.vaddr();
 
             assert!(lock.page_count() != 0);
-            let end = lock.addr() + ((lock.page_count() - 1) * PAGE_SIZE);
+            let end = lock.vaddr() + ((lock.page_count() - 1) * PAGE_SIZE);
 
             if vaddr.0 >= start.0 && vaddr.0 <= end.0 {
                 return Some(region.clone());
@@ -428,28 +482,27 @@ impl MemoryManager {
         vaddr >= VMALLOC_START && vaddr < VMALLOC_END
     }
 
-    fn map_region(&mut self, region: &mut VMRegion,
-                  region_flags: MemoryRegionFlags) {
-        assert!(!region.is_mapped, "Region already mapped");
-
+    fn map_region(&mut self, region: &mut VMRegion) {
         let page_table = &mut self.reference_page_table;
 
-        for page in 0..region.page_count() {
+        for offset in 0..region.page_count() {
             unsafe {
-                let frame = self.frame_allocator.alloc_frame()
-                    .expect("Failed to allocate frame");
+                let frame = if let Some(paddr) = region.paddr() {
+                    Frame::from_paddr(paddr) + offset
+                } else {
+                    self.frame_allocator.alloc_frame()
+                        .expect("Failed to allocate frame")
+                };
 
                 page_table.map_raw(&mut self.frame_allocator,
-                                   &crate::KERNEL_PHYSICAL_MEMORY,
-                                   region.addr() + (page * PAGE_SIZE),
-                                   PhysicalAddress::from(frame),
+                                   &KERNEL_PHYSICAL_MEMORY,
+                                   region.vaddr() + (offset * PAGE_SIZE),
+                                   frame.paddr(),
                                    PageType::Page4K,
-                                   region_flags)
+                                   region.flags())
                     .expect("Failed to map");
             }
         }
-
-        region.is_mapped = true;
     }
 
     fn get_current_page_table<'a>()  {
@@ -457,19 +510,6 @@ impl MemoryManager {
     }
 
     fn page_fault_vmalloc(&mut self, vaddr: VirtualAddress) -> bool {
-        let region = self.find_region(vaddr)
-            .expect("Failed to find region");
-        let mut region = region.write();
-
-        if !region.is_mapped {
-            self.map_region(&mut region,
-                            MemoryRegionFlags::READ |
-                            MemoryRegionFlags::WRITE);
-        }
-
-        // TODO(patrik): Let the page table handle the copying of the entries
-        // let page_table = Self::get_current_page_table();
-
         let process = core!().process();
         let mut process_lock = process.write();
 
@@ -493,7 +533,7 @@ impl MemoryManager {
     }
 
     fn page_fault(&mut self, vaddr: VirtualAddress) -> bool {
-        println!("Page fault: {:?}", vaddr);
+        // println!("Page fault: {:?}", vaddr);
 
         // NOTE(patrik): If the fault is for a vmalloc then we need to map
         // those pages in the current page table maybe even inside the
@@ -538,6 +578,13 @@ pub fn allocate_kernel_vm_zero(name: String, size: usize)
     }
 
     res
+}
+
+pub fn map_physical_to_kernel_vm(paddr: PhysicalAddress, size: usize,
+                                 flags: MemoryRegionFlags)
+    -> Option<VirtualAddress>
+{
+    MM.lock().as_mut().unwrap().map_physical_to_kernel_vm(paddr, size, flags)
 }
 
 pub fn map_in_userspace(memory_space: &mut MemorySpace,

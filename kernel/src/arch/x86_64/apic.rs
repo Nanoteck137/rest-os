@@ -1,11 +1,18 @@
 use crate::acpi;
+use crate::mm;
+use crate::mm::MemoryRegionFlags;
 use crate::mm::{ PhysicalAddress, PhysicalMemory, KERNEL_PHYSICAL_MEMORY };
 
 use core::sync::atomic::{ AtomicUsize, Ordering };
 
 static NUM_CORES: AtomicUsize = AtomicUsize::new(0);
 
-pub struct Apic {}
+enum Mode {
+}
+
+pub struct Apic {
+    mode: Mode,
+}
 
 pub(super) fn initialize() {
     if let Some(apic_table) = acpi::find_table(&KERNEL_PHYSICAL_MEMORY, b"APIC") {
@@ -25,6 +32,17 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
     let apic_addr = KERNEL_PHYSICAL_MEMORY.read_unaligned::<u32>(start);
     let apic_addr = PhysicalAddress(apic_addr as usize);
     println!("APIC Address: {:#x?}", apic_addr);
+
+    let addr = mm::map_physical_to_kernel_vm(apic_addr, 4095,
+                                             MemoryRegionFlags::READ |
+                                             MemoryRegionFlags::WRITE |
+                                             MemoryRegionFlags::DISABLE_CACHE);
+
+    let addr = addr.expect("Failed to map in the APIC");
+    println!("Addr: {:?}", addr);
+
+    let ptr = addr.0 as *mut u32;
+    core::ptr::write_volatile(ptr.offset(0x0f0), (1 << 12) | (1 << 8) | 0xffu32);
 
     let flags = KERNEL_PHYSICAL_MEMORY.read_unaligned::<u32>(start + 4);
 
@@ -50,7 +68,7 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
                 println!("Local APIC: {}, {}, {:#x?}",
                          acpi_processor_id, apic_id, flags);
 
-                if flags & 0x1 == 0x1 || flags & 0x2 == 0x2{
+                if flags & 0x1 == 0x1 || flags & 0x2 == 0x2 {
                     // Core is enabled or Capable of becoming enabled
                     NUM_CORES.fetch_add(1, Ordering::SeqCst);
                 } else {

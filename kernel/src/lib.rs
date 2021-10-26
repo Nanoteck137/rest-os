@@ -307,8 +307,8 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
 
     // Initialize the kernel heap
     initialize_heap();
-    // Get access to the multiboot structure
 
+    // Get access to the multiboot structure
     let multiboot = unsafe {
         Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
                              PhysicalAddress(multiboot_addr))
@@ -439,8 +439,8 @@ fn kernel_init_thread() {
     println!("kernel_init_thread: Hello World");
     // println!("Current Process: {:#x?}", core!().process());
 
-    println!("Current Process: {:#x?}", core!().process());
-    println!("Current Thread: {:#x?}", core!().thread());
+    // println!("Current Process: {:#x?}", core!().process());
+    // println!("Current Thread: {:#x?}", core!().thread());
 
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;

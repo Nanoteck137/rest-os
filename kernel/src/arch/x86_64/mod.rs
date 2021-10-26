@@ -185,5 +185,7 @@ pub fn initialize() {
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
-    serial::print_fmt(args);
+    core!().without_interrupts(|| {
+        serial::print_fmt(args);
+    });
 }

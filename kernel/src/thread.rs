@@ -66,7 +66,7 @@ impl Thread {
 
         let state = ThreadState::Runnable;
 
-        let kernel_stack_size = PAGE_SIZE * 2;
+        let kernel_stack_size = PAGE_SIZE * 4;
         let kernel_stack =
             mm::allocate_kernel_vm(format!("#{} - Kernel Stack", id),
                                    kernel_stack_size)

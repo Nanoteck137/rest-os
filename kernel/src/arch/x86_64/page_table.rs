@@ -20,14 +20,14 @@ bitflags! {
 
 bitflags! {
     struct EntryFlags: usize {
-        const PRESENT  = 1 << 0;
-        const WRITE    = 1 << 1;
-        const USER     = 1 << 2;
-        const DISABLE  = 1 << 4;
-        const ACCESSED = 1 << 5;
-        const DIRTY    = 1 << 6;
-        const SIZE     = 1 << 7;
-        const NX       = 1 << 63;
+        const PRESENT       = 1 << 0;
+        const WRITE         = 1 << 1;
+        const USER          = 1 << 2;
+        const CACHE_DISABLE = 1 << 4;
+        const ACCESSED      = 1 << 5;
+        const DIRTY         = 1 << 6;
+        const SIZE          = 1 << 7;
+        const NX            = 1 << 63;
     }
 }
 
@@ -85,7 +85,7 @@ impl PageTable {
         let frame = frame_allocator.alloc_frame()
             .expect("Failed to allocate frame for the new page table");
 
-        let paddr = PhysicalAddress::from(frame);
+        let paddr = frame.paddr();
 
         Self {
             table: paddr
@@ -168,6 +168,10 @@ impl PageTable {
             page_flags |= EntryFlags::WRITE;
         }
 
+        if flags.contains(MemoryRegionFlags::DISABLE_CACHE) {
+            page_flags |= EntryFlags::CACHE_DISABLE;
+        }
+
         self.map_raw_option(frame_allocator, physical_memory,
                             vaddr, paddr, page_type, page_flags)
     }
@@ -187,6 +191,10 @@ impl PageTable {
         let mut page_flags = EntryFlags::PRESENT | EntryFlags::USER;
         if flags.contains(MemoryRegionFlags::WRITE) {
             page_flags |= EntryFlags::WRITE;
+        }
+
+        if flags.contains(MemoryRegionFlags::DISABLE_CACHE) {
+            page_flags |= EntryFlags::CACHE_DISABLE;
         }
 
         self.map_raw_option(frame_allocator, physical_memory,
@@ -232,7 +240,7 @@ impl PageTable {
         for index in 1..depth {
             if entries[index].is_none() {
                 let new_table = frame_allocator.alloc_frame()?;
-                let new_table = PhysicalAddress::from(new_table);
+                let new_table = new_table.paddr();
                 let ptr = physical_memory.translate(new_table)
                     .expect("Failed to translate addr");
                 core::ptr::write_bytes(ptr.0 as *mut u8, 0, 4096);
@@ -303,8 +311,7 @@ impl PageTable {
     {
         let table_addr = PhysicalAddress(table_addr.0 & !0xfff);
         if Self::can_free_table(physical_memory, table_addr) {
-            let frame = Frame::try_from(table_addr)
-                .expect("Failed to convert to Frame");
+            let frame = Frame::from_paddr(table_addr);
             frame_allocator.free_frame(frame);
 
             return true;

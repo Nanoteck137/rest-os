@@ -1,16 +1,17 @@
 use crate::multiboot::{ Multiboot, Tag };
 use crate::mm::{ PhysicalAddress, PhysicalMemory, KERNEL_PHYSICAL_MEMORY };
+use crate::util;
 
 static mut ACPI_TABLE: Option<PhysicalAddress> = None;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
 struct Rsdp {
-    signature:         [u8; 8],
-    checksum:          u8,
-    oem_id:            [u8; 6],
-    revision:          u8,
-    rsdt_addr:         u32,
+    signature: [u8; 8],
+    checksum: u8,
+    oem_id: [u8; 6],
+    revision: u8,
+    rsdt_addr: u32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -27,39 +28,44 @@ pub struct SDTHeader {
     creator_revision: u32,
 }
 
+// Reference: https://github.com/gamozolabs/chocolate_milk/blob/master/kernel/src/acpi.rs
 unsafe fn search_acpi<P>(physical_memory: &P)
     -> Option<PhysicalAddress>
     where P: PhysicalMemory
 {
+    // Read the EBDA from the BDA
     let ebda = physical_memory.read::<u16>(PhysicalAddress(0x40e)) as usize;
-    println!("Edba: {:#x?}", ebda);
 
+    // The regions we search inside
     let regions = [
         (ebda, ebda + 1024 - 1),
 
         (0xe0000, 0xfffff)
     ];
 
-    // let mut rsdp = None;
-
+    // Search through all the regions we defined
     for &(start, end) in &regions {
-        let start = (start + 0xf) & !0xf;
+        // Align the start address
+        let start = util::align_up(start, 16);
 
+        // Search through the region for the RSDP
         for paddr in (start..=end).step_by(16) {
+            // Calculate the structure end
             let struct_end = start + core::mem::size_of::<Rsdp>() - 1;
 
+            // Check if the structure is over the end for this region
             if struct_end > end {
                 break;
             }
 
-            // Read the table
+            // Read the RSDP
             let table = physical_memory.read::<Rsdp>(PhysicalAddress(paddr));
+            // Check the signature for the RSDP
             if &table.signature != b"RSD PTR " {
                 continue;
             }
 
-            println!("Found table: {:#x?}", table);
-
+            // If we found the RSDP then return the address of the RSDT
             return Some(PhysicalAddress(table.rsdt_addr as usize))
         }
     }
@@ -72,6 +78,7 @@ pub fn initialize<P>(physical_memory: &P, multiboot: &Multiboot)
 {
     let mut acpi_addr = None;
 
+    // Search for the RSDT inside the Multiboot structure
     for tag in multiboot.tags() {
         match tag {
             Tag::Acpi1(addr) => acpi_addr = Some(addr),
