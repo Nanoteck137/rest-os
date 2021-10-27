@@ -72,10 +72,12 @@ pub struct Regs {
     rax: u64,
 }
 
+#[inline]
 pub unsafe fn out8(address: u16, data: u8) {
     asm!("out dx, al", in("dx") address, in("al") data);
 }
 
+#[inline]
 pub unsafe fn in8(address: u16) -> u8 {
     let value: u8;
 
@@ -84,6 +86,7 @@ pub unsafe fn in8(address: u16) -> u8 {
     value
 }
 
+#[inline]
 pub unsafe fn read_cr2() -> u64 {
     let value: u64;
 
@@ -92,6 +95,7 @@ pub unsafe fn read_cr2() -> u64 {
     value
 }
 
+#[inline]
 pub unsafe fn read_cr3() -> u64 {
     let value: u64;
 
@@ -100,10 +104,12 @@ pub unsafe fn read_cr3() -> u64 {
     value
 }
 
+#[inline]
 pub unsafe fn write_cr3(value: u64) {
     asm!("mov cr3, rax", in("rax") value);
 }
 
+#[inline]
 pub unsafe fn read_flags() -> u64 {
     let value: u64;
     asm!("pushfq
@@ -111,6 +117,7 @@ pub unsafe fn read_flags() -> u64 {
     value
 }
 
+#[inline]
 pub unsafe fn rdmsr(msr: u32) -> u64 {
     let value_low: u32;
     let value_high: u32;
@@ -123,6 +130,7 @@ pub unsafe fn rdmsr(msr: u32) -> u64 {
     (value_high as u64) << 32 | value_low as u64
 }
 
+#[inline]
 pub unsafe fn wrmsr(msr: u32, value: u64) {
     let value_low = (value & 0xffffffff) as u32;
     let value_high = ((value >> 32) & 0xffffffff) as u32;
@@ -132,26 +140,32 @@ pub unsafe fn wrmsr(msr: u32, value: u64) {
          in("ecx") msr);
 }
 
+#[inline]
 pub unsafe fn read_fs_base() -> u64 {
     rdmsr(MSR_FS_BASE)
 }
 
+#[inline]
 pub unsafe fn write_fs_base(base: u64) {
     wrmsr(MSR_FS_BASE, base)
 }
 
+#[inline]
 pub unsafe fn read_gs_base() -> u64 {
     rdmsr(MSR_GS_BASE)
 }
 
+#[inline]
 pub unsafe fn write_gs_base(base: u64) {
     wrmsr(MSR_GS_BASE, base)
 }
 
+#[inline]
 pub unsafe fn read_kernel_gs_base() -> u64 {
     rdmsr(MSR_KERNEL_GS_BASE)
 }
 
+#[inline]
 pub unsafe fn write_kernel_gs_base(base: u64) {
     wrmsr(MSR_KERNEL_GS_BASE, base)
 }
@@ -166,6 +180,7 @@ pub unsafe fn force_disable_interrupts() {
     asm!("cli");
 }
 
+#[inline]
 pub fn is_interrupts_enabled() -> bool {
     let flags = unsafe { read_flags() };
 
