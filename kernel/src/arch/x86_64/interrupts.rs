@@ -136,6 +136,7 @@ unsafe extern fn interrupt_handler(number: u8,
         if number == 32 {
             print!(".");
 
+            /*
             let mut old_register_state = ThreadRegisterState::default();
             old_register_state.r15 = regs.r15;
             old_register_state.r14 = regs.r14;
@@ -194,81 +195,11 @@ unsafe extern fn interrupt_handler(number: u8,
 
                 need_swap = frame.cs & 0x11 == 0x11;
             }
+            */
+        } else if number == 0xe0 {
+            print!(".");
 
-            /*
-            let ds: u16;
-            asm!("mov ax, ds", out("ax") ds);
-            let es: u16;
-            asm!("mov ax, es", out("ax") es);
-
-            let mut register_state = RegisterState::default();
-            register_state.regs = *regs;
-            register_state.rip = frame.rip;
-            register_state.rsp = frame.rsp;
-            register_state.rflags = frame.rflags;
-            register_state.cr3 = super::read_cr3();
-
-            register_state.cs = frame.cs;
-            register_state.ss = frame.ss;
-            register_state.ds = ds as u64;
-            register_state.es = es as u64;
-
-            if let Some(control_block) =
-                core!().scheduler().tick(register_state)
-            {
-                *regs = control_block.regs;
-                frame.rip = control_block.stack;
-                frame.rflags = control_block.rflags;
-                frame.rsp = control_block.stack;
-                frame.cs = control_block.cs;
-                frame.ss = control_block.ss;
-
-                let rsp: u64;
-                asm!("mov {}, rsp", out(reg) rsp);
-                println!("Stack: {:#x}", rsp);
-
-                if frame.rip == 0xffffffff80198c73 {
-                    println!("Dafaq");
-                }
-
-                // Now we have the kernel gs
-                // If we came from userspace we swapped the gs
-                // But if we are returing to kernel space we don't need to swap
-                // but if we are returing to userspace we need to swap
-
-                need_swap = frame.cs & 0x11 == 0x11;
-                println!("Need Swap: {}", need_swap);
-
-                asm!("mov ds, ax", in("rax") control_block.ds);
-                asm!("mov es, ax", in("rax") control_block.es);
-
-                println!("Frame: {:#x?}", frame);
-
-                println!("Hello?");
-            }
-                */
-
-            //if let Some((control_block, is_kernel)) = core!().scheduler().next() {
-                // The control block needs to have infomation about where
-                // we are executing because we could be a userspace task but
-                // currently executing inside the kernel.
-
-                // core!().scheduler().tick(regs, frame);
-
-                /*
-                *regs = control_block.regs;
-                frame.rip = control_block.rip,
-                frame.rflags = 0x202,
-                frame.rsp = control_block.rsp,
-
-                if is_kernel {
-
-                } else {
-                    frame.cs = ,
-                    frame.ss ,
-                }
-                */
-            //}
+            core!().arch().apic().eoi();
         } else {
             println!("CPU Interrupts: {}", number);
             println!("Frame: {:#x?}", frame);

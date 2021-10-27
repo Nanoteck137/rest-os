@@ -315,7 +315,7 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     };
 
 
-    _display_multiboot_tags(&multiboot);
+    // _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
     display_memory_map(&multiboot);

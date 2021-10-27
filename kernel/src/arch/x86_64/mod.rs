@@ -46,6 +46,10 @@ impl ArchInfo {
     pub fn set_kernel_stack(&mut self, kernel_stack: u64) {
         self.tss.as_mut().expect("No TSS Available").set_kernel_stack(kernel_stack);
     }
+
+    pub fn apic(&mut self) -> &mut Box<Apic> {
+        self.apic.as_mut().unwrap()
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -182,6 +186,15 @@ pub fn initialize() {
     serial::set_initialized();
 
     apic::initialize();
+
+    // Initialize the BSP
+    initialize_core(core!().core_id());
+}
+
+fn initialize_core(core_id: u32) {
+    unsafe {
+        apic::initialize_core(core_id);
+    }
 }
 
 pub fn debug_print_fmt(args: core::fmt::Arguments) {
