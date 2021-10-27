@@ -6,7 +6,7 @@ use crate::mm::VirtualAddress;
 
 use core::sync::atomic::{ AtomicUsize, Ordering };
 use alloc::boxed::Box;
-use spin::RwLock;
+use spin::{ Mutex, RwLock };
 
 const IA32_APIC_BASE_EN: u64 = 1 << 11;
 const IA32_APIC_BASE: u32 = 0x1b;
@@ -15,6 +15,8 @@ static NUM_CORES: AtomicUsize = AtomicUsize::new(0);
 
 static APIC_ADDR: RwLock<Option<VirtualAddress>> = RwLock::new(None);
 static IOAPIC_ADDR: RwLock<Option<VirtualAddress>> = RwLock::new(None);
+
+static IOAPIC: Mutex<Option<IoApic>> = Mutex::new(None);
 
 #[derive(Copy, Clone, Debug)]
 pub enum Register {
@@ -46,6 +48,21 @@ impl Apic {
         let offset = register as usize;
 
         core::ptr::write_volatile(&mut self.mapping[offset / 4], value)
+    }
+}
+
+struct IoApic {
+    mapping: &'static mut [u32],
+    base_addr: VirtualAddress,
+}
+
+impl IoApic {
+    unsafe fn read_reg(&mut self, offset: u32) -> u32 {
+        core::ptr::write_volatile(&mut self.mapping[0x00 / 4], offset);
+        core::ptr::read_volatile(&self.mapping[0x10 / 4])
+    }
+
+    fn write_reg() {
     }
 }
 
@@ -122,7 +139,16 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
                     .expect("Failed to map the IOAPIC address to kernel vm");
 
                 {
+                    let ptr = io_apic_addr.0 as *mut u32;
+                    let mapping = core::slice::from_raw_parts_mut(ptr, 4096);
+
+                    let mut io_apic = IoApic {
+                        mapping,
+                        base_addr: io_apic_addr,
+                    };
+
                     *IOAPIC_ADDR.write() = Some(io_apic_addr);
+                    *IOAPIC.lock() = Some(io_apic);
                 }
 
                 println!("IO APIC: {} {:#x} {}",
@@ -196,8 +222,16 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
     }
 
     {
-        if let Some(io_apic_addr) = *IOAPIC_ADDR.read() {
-            println!("We have a IO APIC: {:?}", io_apic_addr);
+        if let Some(mut io_apic) = IOAPIC.lock().as_mut() {
+            println!("We have an IO APIC");
+
+            let id = io_apic.read_reg(0);
+            println!("ID: {:#x?}", id);
+            let ver = io_apic.read_reg(0x01);
+            println!("Version: {:#x?}", ver);
+
+            let num_entries = (ver >> 16) + 1;
+            println!("Num entries: {}", num_entries);
         }
     }
 
@@ -215,9 +249,6 @@ pub(super) unsafe fn initialize_core(core_id: u32) {
         };
 
         apic.write_reg(Register::SpuriousInterruptVector, (1 << 8) | 0xff);
-
-        let new = apic.read_reg(Register::SpuriousInterruptVector);
-        println!("New value: {:#x?}", new);
 
         apic.write_reg(Register::DivideConfiguration, 0);
         apic.write_reg(Register::LvtTimer, (1 << 17) | 0xe0);
