@@ -141,6 +141,19 @@ pub unsafe fn wrmsr(msr: u32, value: u64) {
 }
 
 #[inline]
+pub fn rdtsc() -> u64 {
+    let value_high: u32;
+    let value_low: u32;
+    unsafe {
+        asm!("rdtsc",
+             out("edx") value_high,
+             out("eax") value_low);
+    }
+
+    (value_high as u64) << 32 | value_low as u64
+}
+
+#[inline]
 pub unsafe fn read_fs_base() -> u64 {
     rdmsr(MSR_FS_BASE)
 }

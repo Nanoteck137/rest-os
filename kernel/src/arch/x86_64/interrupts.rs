@@ -197,7 +197,7 @@ unsafe extern fn interrupt_handler(number: u8,
             }
             */
         } else if number == 0xe0 {
-            print!(".");
+            tprint!(".");
 
             core!().arch().apic().eoi();
         } else {

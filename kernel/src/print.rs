@@ -6,20 +6,33 @@
 //! the display
 
 use crate::arch;
+use crate::time;
 use crate::mm::{ VirtualAddress, PAGE_SIZE };
 
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {{
-        $crate::print::_print_fmt(format_args!($($arg)*));
+        $crate::print::_print_fmt(format_args!($($arg)*), true);
     }}
 }
 
-// Print macro that appends a newline to the end of a print
 #[macro_export]
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! tprint {
+    ($($arg:tt)*) => {{
+        $crate::print::_print_fmt(format_args!($($arg)*), false);
+    }}
+}
+
+#[macro_export]
+macro_rules! tprintln {
+    () => ($crate::tprint!("\n"));
+    ($($arg:tt)*) => ($crate::tprint!("{}\n", format_args!($($arg)*)))
 }
 
 #[macro_export]
@@ -29,7 +42,6 @@ macro_rules! eprint {
     }}
 }
 
-// Print macro that appends a newline to the end of a print
 #[macro_export]
 macro_rules! eprintln {
     () => ($crate::eprint!("\n"));
@@ -97,7 +109,7 @@ pub fn console_init() {
     }
 }
 
-pub fn _print_fmt(args: core::fmt::Arguments) {
+pub fn _print_fmt(args: core::fmt::Arguments, print_time: bool) {
     use core::fmt::Write;
 
     // TODO(patrik): Print to a side buffer when early printing then switch
@@ -110,9 +122,18 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
         // NOTE(patrik): We can use static mutable here because we know that
         // only one core is gonna access it
         unsafe {
+            if print_time {
+                let _ = EARLY_PRINT_BUFFER.write_fmt(
+                    format_args!("[{:.6}]: ", time::uptime()));
+            }
             let _ = EARLY_PRINT_BUFFER.write_fmt(args);
         }
     } else {
+        if print_time {
+            arch::debug_print_fmt(
+                format_args!("[{:.6}]: ", time::uptime()));
+        }
+
         arch::debug_print_fmt(args);
     }
 }

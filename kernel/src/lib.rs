@@ -75,6 +75,7 @@ mod scheduler;
 mod cpio;
 mod elf;
 mod acpi;
+mod time;
 
 use core::panic::PanicInfo;
 use core::alloc::Layout;
@@ -90,7 +91,7 @@ use util::Locked;
 use mm::{ PhysicalMemory, VirtualAddress, PhysicalAddress };
 use mm::{ Allocator, BitmapFrameAllocator };
 use mm::{ BOOT_PHYSICAL_MEMORY, KERNEL_PHYSICAL_MEMORY };
-use multiboot::{ Multiboot, Tag};
+use multiboot::{ Multiboot, Tag, MemoryMapEntryType };
 use process::{ Process };
 // use process::Task;
 use scheduler::Scheduler;
@@ -131,7 +132,7 @@ impl Device for SerialDevice {
         };
 
         for b in buffer {
-            print!("{}", *b as char);
+            tprint!("{}", *b as char);
         }
     }
 }
@@ -164,6 +165,8 @@ fn display_memory_map(multiboot: &Multiboot) {
     let memory_map = multiboot.find_memory_map()
         .expect("Failed to find memory map");
 
+    let mut availble_memory = 0;
+
     println!("Memory Map:");
     for entry in memory_map.iter() {
         let start = entry.addr();
@@ -173,19 +176,25 @@ fn display_memory_map(multiboot: &Multiboot) {
         print!("[0x{:016x}-0x{:016x}] ", start, end);
 
         if length >= 1 * 1024 * 1024 * 1024 {
-            print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
+            tprint!("{:>4} GiB ", length / 1024 / 1024 / 1024);
         } else if length >= 1 * 1024 * 1024 {
-            print!("{:>4} MiB ", length / 1024 / 1024);
+            tprint!("{:>4} MiB ", length / 1024 / 1024);
         } else if length >= 1 * 1024 {
-            print!("{:>4} KiB ", length / 1024);
+            tprint!("{:>4} KiB ", length / 1024);
         } else {
-            print!("{:>4} B   ", length);
+            tprint!("{:>4} B   ", length);
         }
 
-        print!("{:?}", entry.typ());
+        tprint!("{:?}", entry.typ());
 
-        println!();
+        if entry.typ() == MemoryMapEntryType::Available {
+            availble_memory += length;
+        }
+
+        tprintln!();
     }
+
+    println!("Available memory: {}MiB", availble_memory / 1024 / 1024);
 }
 
 fn _display_multiboot_tags(multiboot: &Multiboot) {
@@ -328,6 +337,8 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     mm::initialize(PhysicalAddress(multiboot_addr));
     processor::init(0);
 
+    time::initialize();
+
     let serial_device = SerialDevice {
         ioctl_count: 0,
     };
@@ -351,6 +362,8 @@ pub extern fn kernel_init(multiboot_addr: usize) -> ! {
     arch::initialize();
 
     acpi::debug_dump();
+
+    time::sleep(2 * 1000 * 1000);
 
     unsafe {
         core!().enable_interrupts();
