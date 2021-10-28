@@ -88,8 +88,6 @@ pub fn initialize<P>(physical_memory: &P, multiboot: &Multiboot)
         }
     }
 
-    acpi_addr = None;
-
     if acpi_addr.is_none() {
         // NOTE(patrik): The bootloader didn't find the ACPI table so
         // we do a search to find it insteed
@@ -183,9 +181,6 @@ pub fn debug_dump() {
 
             let header = unsafe {
                 physical_memory.read_unaligned::<SDTHeader>(addr) };
-
-            let data_addr = addr.0 + core::mem::size_of::<SDTHeader>();
-            let data_addr = PhysicalAddress(data_addr);
 
             println!("  - {}",
                      core::str::from_utf8(&header.signature).unwrap());

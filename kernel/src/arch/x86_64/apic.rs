@@ -142,13 +142,18 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
                     let ptr = io_apic_addr.0 as *mut u32;
                     let mapping = core::slice::from_raw_parts_mut(ptr, 4096);
 
-                    let mut io_apic = IoApic {
+                    let io_apic = IoApic {
                         mapping,
                         base_addr: io_apic_addr,
                     };
 
+                    let mut lock = IOAPIC.lock();
+
+                    assert!(lock.is_none(), "More then one IOAPIC detected, \
+                            we only support one IOAPIC for now");
+
+                    *lock = Some(io_apic);
                     *IOAPIC_ADDR.write() = Some(io_apic_addr);
-                    *IOAPIC.lock() = Some(io_apic);
                 }
 
                 println!("IO APIC: {} {:#x} {}",
@@ -222,7 +227,7 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
     }
 
     {
-        if let Some(mut io_apic) = IOAPIC.lock().as_mut() {
+        if let Some(io_apic) = IOAPIC.lock().as_mut() {
             println!("We have an IO APIC");
 
             let id = io_apic.read_reg(0);
