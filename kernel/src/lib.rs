@@ -12,13 +12,11 @@
 ///  Currenly working on:
 ///
 /// ---------------------------------------------------------------------------
-///   - Fix the problem with context switching from Ring4 -> Ring0
-///     - Set the RSP0 to a valid kernel stack so when a interrupt is raised
-///       then when the processor is in Ring4 we have a valid stack to use
-///
 ///   - Go through and cleanup some error handling code
 ///   - Go through the code and fix all the locks so they behave
 ///     like they should with interrupts
+///   - Switch from using the Spin crate to custom Locks so we can
+///     handle interrupts enable/disable
 ///   - Processes
 ///     - Standard System calls
 ///     - 'replace_image'
@@ -44,6 +42,7 @@
 ///     - Add Arm64 support?
 ///     - Add support for APIC
 ///       - Bring up more cores
+///       - IO APIC
 ///   - ACPI Parsing
 ///   - Bugs
 ///
@@ -455,30 +454,7 @@ fn kernel_init_thread() {
     // println!("Current Process: {:#x?}", core!().process());
     // println!("Current Thread: {:#x?}", core!().thread());
 
-    use alloc::boxed::Box;
-    use alloc::collections::BTreeMap;
-
-    /*
-    for (name, mut device) in &devices {
-        println!("Device: {}", name);
-        let str = "Hello World from device\n";
-
-        let addr = VirtualAddress(str.as_ptr() as usize);
-        device.write().write(addr, str.len());
-    }
-    */
-
     {
-        /*
-        let find_device = |name| {
-            if !devices.contains_key(name) {
-                return None;
-            }
-
-            return devices.get(name);
-        };
-        */
-
         let serial = find_device("serial_device_00")
             .expect("Failed to find serial device");
 

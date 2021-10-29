@@ -171,7 +171,8 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
                 let flags =
                     KERNEL_PHYSICAL_MEMORY.read_unaligned::<u16>(start + 8);
 
-                println!("IO APIC Interrupt Source Override: {} {} {} {}",
+                println!("IO APIC Interrupt Source Override: \
+                         Bus {} IRQ #{} INTR #{} Flags {:#b}",
                          bus_source, irq_source,
                          global_system_interrupt, flags);
             },
