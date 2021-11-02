@@ -1,9 +1,25 @@
 //! This is the build system for the Rest-OS
 //! So this is built and run on the host machine
 
-use std::process::Command;
+// TODO(patrik):
+//   - Add checks
+//     - For rust target is installed
+//       - For GRUB we need x86_64-elf
+//   - Restructure the program
+//   - Add command line options
+//     - Debug/Release build
+//   - Diffrent building environments
+//     - GRUB
+//     - UEFI
+//       - Compile the UEFI-specific loader
 
+use std::process::Command;
 use std::path::{ Path, PathBuf };
+
+use clap::Parser;
+
+mod grub;
+mod uefi;
 
 fn linker() -> String {
     let cross = match std::env::var("CROSS") {
@@ -75,17 +91,6 @@ fn compile_asm<P: AsRef<Path>>(source: P) -> Option<()> {
     Some(())
 }
 
-// Builds all the Assembly files needed for the kernel
-fn build_kernel_asm_files() -> Option<()> {
-    // Boot.asm
-
-    let asm_source =
-        kernel_source(&["arch", "x86_64", "boot", "boot.asm"]);
-    compile_asm(asm_source)?;
-
-    Some(())
-}
-
 fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P)
     -> Option<()>
 {
@@ -112,10 +117,31 @@ fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P)
     Some(())
 }
 
-fn build_rust_projects() -> Option<()> {
-    build_rust_project("kernel", "target")?;
+fn link_executable<P>(obj_file: P, target: P, linker_script: P)
+    where P: AsRef<Path>
+{
+    let target = target.as_ref();
+    let linker_script = linker_script.as_ref();
+    let obj_file = obj_file.as_ref();
 
-    Some(())
+    let linker = linker();
+
+    let output = Command::new(linker)
+        .arg("-n")
+        .arg("-T")
+        .arg(&linker_script)
+        .arg("-o")
+        .arg(target)
+        .arg(obj_file)
+        .output()
+            .expect("Unknown error when running 'ld' (is ld installed?)");
+
+        //.arg("target/x86_64-rest-os/debug/librest_os.a");
+
+    if !output.status.success() {
+        let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
+        eprintln!("Linking Error Message:\n{}", error_message);
+    }
 }
 
 fn build_userland_bin(name: &str) -> Option<()> {
@@ -137,7 +163,7 @@ fn build_userland_bin(name: &str) -> Option<()> {
     Some(())
 }
 
-fn copy_userland_bin_to_initrd(name: &str) -> Option<()> {
+fn copy_userland_bin_to_initrd(name: &str) {
     // target/userland/init/x86_64/debug/init
     let mut source = PathBuf::new();
     source.push("target");
@@ -153,8 +179,6 @@ fn copy_userland_bin_to_initrd(name: &str) -> Option<()> {
     dest.push(name);
 
     let _ = std::fs::copy(source, dest);
-
-    Some(())
 }
 
 fn build_initrd() -> Option<()> {
@@ -170,83 +194,51 @@ fn build_initrd() -> Option<()> {
     Some(())
 }
 
-fn prepare_initrd() -> Option<()> {
-    build_userland_bin("init")?;
-    copy_userland_bin_to_initrd("init")?;
+fn prepare_initrd() {
+    build_userland_bin("init");
+    copy_userland_bin_to_initrd("init");
 
-    build_initrd()?;
-
-    Some(())
+    build_initrd();
 }
 
-fn main() {
-    println!("Building Rest-OS");
+#[derive(Parser, Debug)]
+#[clap(version = "0.0.1", author = "Patrik M. Rosenström <patrik.millvik@gmail.com>")]
+struct Opts {
+    #[clap(short, long)]
+    release: bool,
 
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(Parser, Debug)]
+enum Commands {
+    BuildGrub(BuildGrub),
+    BuildUefi(BuildUefi),
+}
+
+#[derive(Parser, Debug)]
+struct BuildGrub {}
+
+#[derive(Parser, Debug)]
+struct BuildUefi {}
+
+fn main() {
+    // Parse the command line arguments
+    let opts = Opts::parse();
+
+    // Create target the directories
     let _ = std::fs::create_dir("target");
     let _ = std::fs::create_dir("target/userland");
     let _ = std::fs::create_dir("target/initrd");
-    let _ = std::fs::create_dir("target/isofiles");
-    let _ = std::fs::create_dir("target/isofiles/boot");
-    let _ = std::fs::create_dir("target/isofiles/boot/grub");
 
-    println!("Target directory: {:?}", target_dir(&[]));
-    println!("Kernel Source directory: {:?}", kernel_source(&[]));
+    match opts.command {
+        Commands::BuildGrub(_) => {
+            grub::build(opts.release);
+        }
 
-    build_kernel_asm_files().expect("Failed to build the assembly files");
-    build_rust_projects().expect("Failed to build the rust projects");
-
-    let linker = linker();
-
-    let target = target_dir(&["kernel.elf"]);
-    let output = Command::new(linker)
-        .arg("-n")
-        .arg("-T")
-        .arg("kernel/src/arch/x86_64/linker.ld")
-        .arg("-o")
-        .arg(target)
-        .arg("target/x86_64-rest-os/debug/librest_os.a")
-        .output()
-            .expect("Unknown error when running 'ld' (is ld installed?)");
-
-    if !output.status.success() {
-        let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
-        eprintln!("Linking Error Message:\n{}", error_message);
+        Commands::BuildUefi(_) => {
+            uefi::build(opts.release);
+        }
     }
-
-    let source = target_dir(&["kernel.elf"]);
-    let dest = target_dir(&["isofiles", "boot", "kernel"]);
-
-    let _ = std::fs::copy(source, dest);
-
-    let source = "misc/grub.cfg";
-    let dest = target_dir(&["isofiles", "boot", "grub", "grub.cfg"]);
-
-    let _ = std::fs::copy(source, dest);
-
-    println!("Preparing initrd");
-    prepare_initrd()
-        .expect("Failed to prepare initrd");
-
-    let source = target_dir(&["initrd.cpio"]);
-    let dest = target_dir(&["isofiles", "boot", "initrd.cpio"]);
-
-    let _ = std::fs::copy(source, dest);
-
-    println!("Creating the Image");
-
-    let target = target_dir(&["image.iso"]);
-    let iso_dir = target_dir(&["isofiles"]);
-    let output = Command::new("grub-mkrescue")
-        .arg("-o")
-        .arg(target)
-        .arg(iso_dir)
-        .output()
-            .expect("Unknown error when running 'grub-mkrescue' (is grub-mkrescue installed?)");
-
-    if !output.status.success() {
-        let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
-        eprintln!("Error Message:\n{}", error_message);
-    }
-
 }
-
