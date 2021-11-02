@@ -42,11 +42,42 @@ pub fn sleep(microseconds: u64) {
     }
 }
 
-fn calibrate() {
+unsafe fn calibrate() {
+    println!("Calibrating the TSC clock");
+
     let start = x86_64::rdtsc();
     TSC_START.store(start, Ordering::Relaxed);
+
+    let start = x86_64::rdtsc();
+
+    x86_64::out8(0x43, 0x30);
+    x86_64::out8(0x40, 0xff);
+    x86_64::out8(0x40, 0xff);
+
+    loop {
+        x86_64::out8(0x43, 0xe2);
+
+        if (x86_64::in8(0x40) & 0x80) != 0 {
+            break;
+        }
+    }
+
+    let end = x86_64::rdtsc();
+
+    let elapsed = 65535f64 / 1193182f64;
+
+    let computed_rate = ((end - start) as f64) / elapsed / 1000000.0;
+    let rounded_rate = (((computed_rate / 100.0) + 0.5) as u64) * 100;
+
+    let old_freq = TSC_FREQ_MHZ.load(Ordering::Relaxed);
+    println!("Old TSC freq: {} MHz", old_freq);
+    println!("New TSC freq: {} MHz", rounded_rate);
+
+    TSC_FREQ_MHZ.store(rounded_rate, Ordering::Relaxed);
 }
 
 pub fn initialize() {
-    calibrate();
+    unsafe {
+        calibrate();
+    }
 }

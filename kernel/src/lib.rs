@@ -449,10 +449,6 @@ fn kernel_init_thread() {
     // TODO(patrik): Here we can release the stack we used from the bootloader.
 
     println!("kernel_init_thread: Hello World");
-    // println!("Current Process: {:#x?}", core!().process());
-
-    // println!("Current Process: {:#x?}", core!().process());
-    // println!("Current Thread: {:#x?}", core!().thread());
 
     {
         let serial = find_device("serial_device_00")
