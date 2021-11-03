@@ -200,6 +200,13 @@ unsafe extern fn interrupt_handler(number: u8,
             tprint!(".");
 
             core!().arch().apic().eoi();
+        } else if number == 222 {
+            let scancode = super::in8(0x60);
+            println!("Scancode: {}", scancode);
+
+            super::out8(0x64, 0xff);
+
+            super::apic::eoi(222);
         } else {
             println!("CPU Interrupts: {}", number);
             println!("Frame: {:#x?}", frame);

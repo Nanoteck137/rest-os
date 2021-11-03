@@ -22,11 +22,15 @@ static IOAPIC: Mutex<Option<IoApic>> = Mutex::new(None);
 pub enum Register {
     ApicId = 0x20,
     EndOfInterrupt = 0xb0,
+    DestinationFormat = 0xe0,
     SpuriousInterruptVector = 0xf0,
 
     LvtTimer = 0x320,
     InitialCount = 0x380,
     DivideConfiguration = 0x3e0,
+
+    LvtLint0 = 0x350,
+    LvtLint1 = 0x360,
 }
 
 pub struct Apic {
@@ -51,18 +55,109 @@ impl Apic {
     }
 }
 
+struct RedirectionEntry(u64);
+
+impl RedirectionEntry {
+    fn vector(&self) -> u8 {
+        (self.0 & 0xff) as u8
+    }
+
+    fn set_vector(&mut self, vector: u8) {
+        self.0 |= vector as u64;
+    }
+
+    fn set_masked(&mut self, mask: bool) {
+        let mut value = self.0 & !(1 << 16);
+
+        if mask {
+            value |= (1 << 16);
+        }
+
+        self.0 = value;
+    }
+}
+
 struct IoApic {
     mapping: &'static mut [u32],
     base_addr: VirtualAddress,
+
+    num_entries: usize,
 }
 
 impl IoApic {
+    unsafe fn initialize(&mut self) {
+        let id = self.read_reg(0);
+        println!("ID: {:#x?}", id);
+        let ver = self.read_reg(0x01);
+        println!("Version: {:#x?}", ver);
+
+        let num_entries = (ver >> 16) + 1;
+        println!("Num entries: {}", num_entries);
+
+        self.num_entries = num_entries as usize;
+
+        let mut entry = self.read_entry(1)
+            .expect("Failed to read entry");
+
+        entry.set_vector(0xde);
+        entry.set_masked(false);
+
+        self.write_entry(1, entry);
+
+        for index in 0..self.num_entries {
+            let entry = self.read_entry(index)
+                .expect("Failed to read entry");
+
+            println!("Entry #{}: {:#x}", index, entry.0);
+        }
+
+    }
+
     unsafe fn read_reg(&mut self, offset: u32) -> u32 {
         core::ptr::write_volatile(&mut self.mapping[0x00 / 4], offset);
         core::ptr::read_volatile(&self.mapping[0x10 / 4])
     }
 
-    fn write_reg() {
+    unsafe fn write_reg(&mut self, offset: u32, value: u32) {
+        core::ptr::write_volatile(&mut self.mapping[0x00 / 4], offset);
+        core::ptr::write_volatile(&mut self.mapping[0x10 / 4], value);
+    }
+
+    unsafe fn eoi(&mut self, vector: u8) {
+        core::ptr::write_volatile(&mut self.mapping[16], vector as u32);
+    }
+
+    unsafe fn read_entry(&mut self, index: usize) -> Option<RedirectionEntry> {
+        if index >= self.num_entries {
+            return None;
+        }
+
+        let offset = 0x10 + 2 * index;
+        let offset = offset as u32;
+        let lower = self.read_reg(offset);
+        let upper = self.read_reg(offset + 1);
+
+        let value = (upper as u64) << 32 | lower as u64;
+        Some(RedirectionEntry(value))
+    }
+
+    unsafe fn write_entry(&mut self, index: usize, entry: RedirectionEntry)
+        -> Option<()>
+    {
+        if index >= self.num_entries {
+            return None;
+        }
+
+        let lower = (entry.0 & 0xffffffff) as u32;
+        let upper = ((entry.0 >> 32) & 0xffffffff) as u32;
+
+        let offset = 0x10 + 2 * index;
+        let offset = offset as u32;
+
+        self.write_reg(offset + 1, upper);
+        self.write_reg(offset, lower);
+
+        Some(())
     }
 }
 
@@ -145,6 +240,8 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
                     let io_apic = IoApic {
                         mapping,
                         base_addr: io_apic_addr,
+
+                        num_entries: 0,
                     };
 
                     let mut lock = IOAPIC.lock();
@@ -230,14 +327,7 @@ unsafe fn parse_madt_table(madt: acpi::Table) -> Option<()> {
     {
         if let Some(io_apic) = IOAPIC.lock().as_mut() {
             println!("We have an IO APIC");
-
-            let id = io_apic.read_reg(0);
-            println!("ID: {:#x?}", id);
-            let ver = io_apic.read_reg(0x01);
-            println!("Version: {:#x?}", ver);
-
-            let num_entries = (ver >> 16) + 1;
-            println!("Num entries: {}", num_entries);
+            io_apic.initialize();
         }
     }
 
@@ -254,12 +344,18 @@ pub(super) unsafe fn initialize_core(core_id: u32) {
             mapping
         };
 
-        apic.write_reg(Register::SpuriousInterruptVector, (1 << 8) | 0xff);
-
-        apic.write_reg(Register::DivideConfiguration, 0);
+        apic.write_reg(Register::DivideConfiguration, 3);
         apic.write_reg(Register::LvtTimer, (1 << 17) | 0xe0);
         apic.write_reg(Register::InitialCount, 500_00000);
 
+        apic.write_reg(Register::LvtLint0, 0x087fd);
+        apic.write_reg(Register::LvtLint1, 0x4fe);
+
+        apic.write_reg(Register::SpuriousInterruptVector, (1 << 8) | 0xff);
         core!().arch().apic = Some(Box::new(apic));
     }
+}
+
+pub unsafe fn eoi(vector: u8) {
+    IOAPIC.lock().as_mut().expect("LEL").eoi(vector);
 }
