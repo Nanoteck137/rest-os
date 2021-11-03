@@ -345,12 +345,9 @@ pub(super) unsafe fn initialize_core(core_id: u32) {
             mapping
         };
 
-        apic.write_reg(Register::DivideConfiguration, 3);
+        apic.write_reg(Register::DivideConfiguration, 0);
         apic.write_reg(Register::LvtTimer, (1 << 17) | 0xe0);
         apic.write_reg(Register::InitialCount, 500_00000);
-
-        apic.write_reg(Register::LvtLint0, 0x087fd);
-        apic.write_reg(Register::LvtLint1, 0x4fe);
 
         apic.write_reg(Register::SpuriousInterruptVector, (1 << 8) | 0xff);
         core!().arch().apic = Some(Box::new(apic));
@@ -358,5 +355,5 @@ pub(super) unsafe fn initialize_core(core_id: u32) {
 }
 
 pub unsafe fn eoi(vector: u8) {
-    IOAPIC.lock().as_mut().expect("LEL").eoi(vector);
+    IOAPIC.lock().as_mut().unwrap().eoi(vector);
 }
