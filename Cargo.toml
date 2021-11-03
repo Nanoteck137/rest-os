@@ -1,3 +1,5 @@
+cargo-features = ["edition2021"]
+
 [package]
 name = "rest-os"
 version = "0.1.0"

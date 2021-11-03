@@ -204,9 +204,10 @@ unsafe extern fn interrupt_handler(number: u8,
             let scancode = super::in8(0x60);
             println!("Scancode: {}", scancode);
 
-            super::out8(0x64, 0xff);
+            // super::out8(0x64, 0xff);
 
             super::apic::eoi(222);
+            core!().arch().apic().eoi();
         } else {
             println!("CPU Interrupts: {}", number);
             println!("Frame: {:#x?}", frame);

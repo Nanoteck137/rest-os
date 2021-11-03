@@ -124,7 +124,8 @@ impl IoApic {
     }
 
     unsafe fn eoi(&mut self, vector: u8) {
-        core::ptr::write_volatile(&mut self.mapping[16], vector as u32);
+        core::ptr::write_volatile(&mut self.mapping[0x40 / 4], vector as u32);
+        core::ptr::write_volatile(&mut self.mapping[0x40 / 4], 0);
     }
 
     unsafe fn read_entry(&mut self, index: usize) -> Option<RedirectionEntry> {
