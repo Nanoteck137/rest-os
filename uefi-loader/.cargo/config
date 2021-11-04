@@ -1,0 +1,8 @@
+[unstable]
+build-std = ["core", "alloc", "compiler_builtins"]
+
+[build]
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "linker=lld-link", "-C", "link-args=/entry:efi_main /subsystem:EFI_APPLICATION"]

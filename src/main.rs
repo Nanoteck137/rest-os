@@ -92,7 +92,8 @@ fn compile_asm<P: AsRef<Path>>(source: P) -> Option<()> {
 }
 
 fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P,
-                                      release_mode: bool)
+                                      release_mode: bool,
+                                      need_linker: bool)
     -> Option<()>
 {
     let project_path = project_path.as_ref();
@@ -101,26 +102,23 @@ fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P,
 
     let linker = linker();
 
-    let status =  if release_mode {
-        Command::new("cargo")
-            .current_dir(project_path)
-            .env("RUSTFLAGS", format!("-C linker={}", linker))
-            .arg("build")
-            .arg("--release")
-            .arg("--target-dir")
-            .arg(target_path)
-            .status()
-                .expect("Unknown error when running 'cargo'")
-    } else {
-        Command::new("cargo")
-            .current_dir(project_path)
-            .env("RUSTFLAGS", format!("-C linker={}", linker))
-            .arg("build")
-            .arg("--target-dir")
-            .arg(target_path)
-            .status()
-                .expect("Unknown error when running 'cargo'")
-    };
+    let mut command = Command::new("cargo");
+    command.current_dir(project_path);
+    if need_linker {
+        command.env("RUSTFLAGS", format!("-C linker={}", linker));
+    }
+
+    command.arg("build");
+
+    if release_mode {
+        command.arg("--release");
+    }
+
+    command.arg("--target-dir");
+    command.arg(target_path);
+
+    let status = command.status()
+        .expect("Unknown error when running 'cargo'");
 
     if !status.success() {
         return None;
@@ -170,7 +168,7 @@ fn build_userland_bin(name: &str) -> Option<()> {
     println!("Target Path: {:?}", target_path);
 
     let _ = std::fs::create_dir(&target_path);
-    build_rust_project(project_path, target_path, false)?;
+    build_rust_project(project_path, target_path, false, true)?;
 
     Some(())
 }
