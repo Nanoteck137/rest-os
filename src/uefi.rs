@@ -39,7 +39,7 @@ fn bootloader_path() -> PathBuf {
 }
 
 fn loader_exe_path(release_mode: bool) -> PathBuf {
-    let mut path = target_dir(&[]");
+    let mut path = target_dir(&[]);
     path.push("x86_64-pc-windows-gnu");
     if release_mode {
         path.push("release");
@@ -47,17 +47,21 @@ fn loader_exe_path(release_mode: bool) -> PathBuf {
         path.push("debug");
     }
     path.push("uefi-loader.exe");
+
+    path
 }
 
 pub fn build(release_mode: bool) {
     // TODO(patrik): Build the kernel
     // TODO(patrik): Build the bootloader
 
-    let project_path = bootloader_path();
-    let target_dir = target_dir(&[]);
-    build_rust_project(project_path, target_dir, release_mode, false);
+    {
+        let project_path = bootloader_path();
+        let target_dir = target_dir(&[]);
+        build_rust_project(project_path, target_dir, release_mode, false);
+    }
 
-    let source = loader_exe_path();
+    let source = loader_exe_path(release_mode);
     let mut dest = target_dir(&[]);
     let test = 132;
 
