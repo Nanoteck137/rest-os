@@ -115,13 +115,102 @@ struct EfiSystemTable {
     configuration_table: usize
 }
 
-#[no_mangle]
-fn efi_main(_image_handle: usize, table: &EfiSystemTable) -> u64 {
-    unsafe {
-        (table.con_out.clear_screen)(&table.con_out);
-        let data = [0x42u16,0x42u16,0x42u16,0x42u16,0x42u16,0x42u16,0xdu16,0xau16, 0x00u16];
-        (table.con_out.output_string)(&table.con_out, data.as_ptr());
+static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
+
+unsafe fn system_table() -> &'static EfiSystemTable {
+    assert!(!SYSTEM_TABLE.is_null(), "System table not initialized");
+
+    &*SYSTEM_TABLE
+}
+
+struct ConsoleWriter {}
+
+impl ConsoleWriter {
+    fn print_str(&self, s: &str) {
+        let system_table = unsafe { system_table() };
+
+        let mut buffer = [0u16; 1024];
+        let mut index = 0;
+
+        for c in s.bytes() {
+            if c == b'\n' {
+                buffer[index] = b'\r' as u16;
+                index += 1;
+
+                // TODO(patrik): Check 'p' for overflow and flush the buffer
+
+                buffer[index] = b'\n' as u16;
+                index += 1;
+
+                // TODO(patrik): Check 'p' for overflow and flush the buffer
+
+                continue;
+            }
+
+            buffer[index] = c as u16;
+            index += 1;
+
+            if index >= buffer.len() {
+                // TODO(patrik): Flush the buffer
+            }
+        }
+
+        unsafe {
+            (system_table.con_out.output_string)(&system_table.con_out,
+                                                 buffer.as_ptr());
+        }
     }
+}
+
+impl core::fmt::Write for ConsoleWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.print_str(s);
+        Ok(())
+    }
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        $crate::_print_fmt(format_args!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)))
+}
+
+static mut WRITER: ConsoleWriter = ConsoleWriter {};
+
+pub fn _print_fmt(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+
+    unsafe {
+        let _ = WRITER.write_fmt(args);
+    }
+}
+
+#[no_mangle]
+fn efi_main(_image_handle: usize, table: *const EfiSystemTable) -> u64 {
+    unsafe {
+        SYSTEM_TABLE = table;
+    }
+
+    // TODO(patrik): Have a copy of the kernel.efl inside this executable
+    // TODO(patrik): Setup the kernel page table
+    // TODO(patrik): Load in the kernel
+    // TODO(patrik): Load the initrd
+    // TODO(patrik): Create some kind of structure to pass in to the kernel
+    //   - Memory map
+    //   - ACPI Tables
+    //   - Kernel command line, Where from to retrive the command line?
+    //     - Read from a file?
+    //     - Embed inside the bootloader or kernel executable?
+    //   - Initrd
+
+    // println!("Hello World: {:#x?}", efi_main as *const u32);
 
     loop {}
 }
