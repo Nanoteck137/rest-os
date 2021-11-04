@@ -12,7 +12,7 @@ mformat -i part.img -h 32 -t 32 -n 64 -c 1
 mmd -i part.img ::/EFI
 mmd -i part.img ::/EFI/boot
 
-mcopy -i part.img /data/boot.efi ::/EFI/boot/main.efi
+mcopy -i part.img /data/boot.efi ::/EFI/boot/BOOTX64.efi
 mcopy -i part.img /data/startup.nsh ::
 
 dd if=part.img of=image.img bs=512 count=91669 seek=2048 conv=notrunc

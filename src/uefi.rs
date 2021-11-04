@@ -63,7 +63,13 @@ pub fn build(release_mode: bool) {
 
     let source = loader_exe_path(release_mode);
     let mut dest = target_dir(&[]);
-    let test = 132;
+    dest.push("boot.efi");
+
+    let _ = std::fs::copy(source, dest);
+
+    let source = "misc/startup.nsh";
+    let mut dest = target_dir(&[]);
+    dest.push("startup.nsh");
 
     let _ = std::fs::copy(source, dest);
 
