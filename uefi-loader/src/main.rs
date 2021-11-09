@@ -1,3 +1,5 @@
+#![feature(asm)]
+
 #![no_std]
 #![no_main]
 
@@ -77,6 +79,14 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 
 static KERNEL_BIN: &'static [u8] = include_bytes!("../../target/kernel.elf");
 
+/// Read the cr3 register
+unsafe fn read_cr3() -> u64 {
+    let cr3: u64;
+    asm!("mov {}, cr3", out(reg) cr3);
+
+    cr3
+}
+
 #[no_mangle]
 fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     unsafe {
@@ -88,6 +98,7 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     // TODO(patrik): Load in the kernel
     // TODO(patrik): Load the initrd
     // TODO(patrik): Create some kind of structure to pass in to the kernel
+    //   - Starting Heap
     //   - Memory map
     //   - ACPI Tables
     //   - Kernel command line, Where from to retrive the command line?
@@ -97,6 +108,9 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
     efi::clear_screen()
         .expect("Failed to clear the screen");
+
+    let cr3 = unsafe { read_cr3() };
+    println!("CR3: {:#x}", cr3);
 
     let elf = Elf::parse(&KERNEL_BIN)
         .expect("Failed to parse kernel elf");
@@ -129,6 +143,18 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         unsafe {
             // Copy the bytes from the program header to the allocated region
             core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data_size);
+        }
+
+        // TODO(patrik): Map the pages to the page table
+
+        for index in 0..page_count {
+            let vaddr = program_header.vaddr() + (index * 0x1000) as u64;
+            let paddr = addr + index * 0x1000;
+
+            println!("We need to map: Vaddr({:#x}) -> Paddr({:#x})",
+                     vaddr, paddr);
+
+            // map_page(cr3, vaddr, paddr);
         }
     }
 
