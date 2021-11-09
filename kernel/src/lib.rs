@@ -61,6 +61,8 @@ macro_rules! verify_interrupts_disabled {
 #[macro_use] extern crate kernel_api;
 #[macro_use] extern crate bitflags;
 
+extern crate elf;
+
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
 #[macro_use] mod processor;
@@ -72,7 +74,6 @@ mod thread;
 mod process;
 mod scheduler;
 mod cpio;
-mod elf;
 mod acpi;
 mod time;
 

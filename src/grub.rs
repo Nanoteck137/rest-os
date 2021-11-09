@@ -47,7 +47,7 @@ fn linker_script_path() -> PathBuf {
     let mut path = kernel_source(&[]);
     path.push("arch");
     path.push("x86_64");
-    path.push("linker.ld");
+    path.push("grub-linker.ld");
 
     path
 }

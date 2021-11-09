@@ -1,6 +1,6 @@
 //! Module to handle the building of the kernel and the bootloader for UEFI
 
-use crate::{ build_rust_project, target_dir };
+use crate::{ build_rust_project, target_dir, link_executable, kernel_source };
 
 use std::process::Command;
 use std::path::PathBuf;
@@ -51,9 +51,53 @@ fn loader_exe_path(release_mode: bool) -> PathBuf {
     path
 }
 
+/// Creates a path to the kernel archive
+fn kernel_archive(release_mode: bool) -> PathBuf {
+    let mut path = target_dir(&[]);
+    path.push("x86_64-rest-os");
+
+    if release_mode {
+        path.push("release");
+    } else {
+        path.push("debug");
+    }
+
+    path.push("librest_os.a");
+
+    path
+}
+
+/// Creates a path to the kernel executable
+/// TODO(patrik): Move to common
+fn kernel_executable_target() -> PathBuf {
+    let mut path = target_dir(&[]);
+    path.push("kernel.elf");
+
+    path
+}
+
+/// Creates a path to the linker script our GRUB loader uses
+fn linker_script_path() -> PathBuf {
+    let mut path = kernel_source(&[]);
+    path.push("arch");
+    path.push("x86_64");
+    path.push("uefi-linker.ld");
+
+    path
+}
+
 pub fn build(release_mode: bool) {
     // TODO(patrik): Build the kernel
     // TODO(patrik): Build the bootloader
+
+    // Build the kernel rust project
+    build_rust_project("kernel", "target", release_mode, true);
+
+    // Link the kernel executable
+    let kernel_archive = kernel_archive(release_mode);
+    let kernel_target = kernel_executable_target();
+    let kernel_linker_script = linker_script_path();
+    link_executable(kernel_archive, kernel_target, kernel_linker_script);
 
     {
         let project_path = bootloader_path();

@@ -70,7 +70,7 @@ impl RedirectionEntry {
         let mut value = self.0 & !(1 << 16);
 
         if mask {
-            value |= (1 << 16);
+            value |= 1 << 16;
         }
 
         self.0 = value;

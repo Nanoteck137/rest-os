@@ -86,7 +86,7 @@ fn compile_asm<P: AsRef<Path>>(source: P) {
             .expect("Unknown error when running 'nasm' (is nasm installed?)");
 
     if !output.status.success() {
-        let error_message = std::str::from_utf8(&output.stderr).ok()
+        let error_message = std::str::from_utf8(&output.stderr)
             .expect("Failed to convert stderr to str");
         eprintln!("Error Message:\n{}", error_message);
 
@@ -99,7 +99,7 @@ fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P,
                                       need_linker: bool)
 {
     let project_path = project_path.as_ref();
-    let target_path = target_path.as_ref().canonicalize().ok()
+    let target_path = target_path.as_ref().canonicalize()
         .expect("Failed to cononicalize the target path");
     println!("Building rust: {:?} -> {:?}", project_path, target_path);
 
