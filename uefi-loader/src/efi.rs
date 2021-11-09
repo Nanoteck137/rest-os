@@ -15,6 +15,7 @@ static SYSTEM_TABLE: AtomicPtr<EfiSystemTable> =
 #[derive(Debug)]
 pub enum Error {
     SystemTableNotRegistered,
+    AllocatePages(EfiStatus),
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -24,7 +25,6 @@ enum EfiAllocateType {
     AllocateAnyPages,
     AllocateMaxAddress,
     AllocateAddress,
-    MaxAllocateType
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -52,7 +52,7 @@ enum EfiMemoryType {
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
-enum EfiWarning {
+pub enum EfiWarning {
     /// The string contained one or more characters that the device could
     /// not render and were skipped.
     UnknownGlyph,
@@ -78,6 +78,7 @@ enum EfiWarning {
     /// The operation will be processed across a system reset.
     ResetRequired,
 
+    /// Unknown EFI warning
     Unknown(u64),
 }
 
@@ -97,19 +98,160 @@ impl From<u64> for EfiWarning {
     }
 }
 
-enum EfiError {
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum EfiError {
+    /// The image failed to load.
+    LoadError,
+
+    /// A parameter was incorrect.
+    InvalidParameter,
+
+    /// The operation is not supported.
+    Unsupported,
+
+    /// The buffer was not the proper size for the request.
+    BadBufferSize,
+
+    /// The buffer is not large enough to hold the requested data.
+    /// The required buffer size is returned in the appropriate parameter
+    /// when this error occurs.
+    BufferTooSmall,
+
+    /// There is no data pending upon return.
+    NotReady,
+
+    /// The physical device reported an error while attempting the operation.
+    DeviceError,
+
+    /// The device cannot be written to.
+    WriteProtected,
+
+    /// A resource has run out.
+    OutOfResources,
+
+    /// An inconstancy was detected on the file system causing the operating
+    /// to fail.
+    VolumeCorrupted,
+
+    /// There is no more space on the file system.
+    VolumeFull,
+
+    /// The device does not contain any medium to perform the operation.
+    NoMedia,
+
+    /// The medium in the device has changed since the last access.
+    MediaChanged,
+
+    /// The item was not found.
+    NotFound,
+
+    /// Access was denied.
+    AccessDenied,
+
+    /// The server was not found or did not respond to the request.
+    NoResponse,
+
+    /// A mapping to a device does not exist.
+    NoMapping,
+
+    /// The timeout time expired.
+    Timeout,
+
+    /// The protocol has not been started.
+    NotStarted,
+
+    /// The protocol has already been started.
+    AlreadyStarted,
+
+    /// The operation was aborted.
+    Aborted,
+
+    /// An ICMP error occurred during the network operation.
+    IcmpError,
+
+    /// A TFTP error occurred during the network operation.
+    TftpError,
+
+    /// A protocol error occurred during the network operation.
+    ProtocolError,
+
+    /// The function encountered an internal version that was incompatible
+    /// with a version requested by the caller.
+    IncompatibleVersion,
+
+    /// The function was not performed due to a security violation.
+    SecurityViolation,
+
+    /// A CRC error was detected.
+    CrcError,
+
+    /// Beginning or end of media was reached
+    EndOfMedia,
+
+    /// The end of the file was reached.
+    EndOfFile,
+
+    /// The language specified was invalid.
+    InvalidLanguage,
+
+    /// The security status of the data is unknown or compromised and the
+    /// data must be updated or replaced to restore a valid security status.
+    CompromisedData,
+
+    /// There is an address conflict address allocation
+    IpAddressConflict,
+
+    /// A HTTP error occurred during the network operation.
+    HttpError,
+
+    /// Unknown EFI error
     Unknown(u64),
 }
 
 impl From<u64> for EfiError {
     fn from(value: u64) -> Self {
         match value {
+            1 => Self::LoadError,
+            2 => Self::InvalidParameter,
+            3 => Self::Unsupported,
+            4 => Self::BadBufferSize,
+            5 => Self::BufferTooSmall,
+            6 => Self::NotReady,
+            7 => Self::DeviceError,
+            8 => Self::WriteProtected,
+            9 => Self::OutOfResources,
+            10 => Self::VolumeCorrupted,
+            11 => Self::VolumeFull,
+            12 => Self::NoMedia,
+            13 => Self::MediaChanged,
+            14 => Self::NotFound,
+            15 => Self::AccessDenied,
+            16 => Self::NoResponse,
+            17 => Self::NoMapping,
+            18 => Self::Timeout,
+            19 => Self::NotStarted,
+            20 => Self::AlreadyStarted,
+            21 => Self::Aborted,
+            22 => Self::IcmpError,
+            23 => Self::TftpError,
+            24 => Self::ProtocolError,
+            25 => Self::IncompatibleVersion,
+            26 => Self::SecurityViolation,
+            27 => Self::CrcError,
+            28 => Self::EndOfMedia,
+            31 => Self::EndOfFile,
+            32 => Self::InvalidLanguage,
+            33 => Self::CompromisedData,
+            34 => Self::IpAddressConflict,
+            35 => Self::HttpError,
+
             _ => EfiError::Unknown(value),
         }
     }
 }
 
-enum EfiStatus {
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum EfiStatus {
     Success,
 
     Warning(EfiWarning),
@@ -175,7 +317,8 @@ struct EfiBootServices {
     raise_tpl: usize,
     restore_tpl: usize,
 
-    allocate_pages: usize,
+    allocate_pages: unsafe extern fn(EfiAllocateType, EfiMemoryType,
+                                     usize, &mut usize) -> EfiStatusCode,
     free_pages: usize,
     get_memory_map: usize,
     allocate_pool: usize,
@@ -289,4 +432,40 @@ pub fn output_string(buffer: &[u16]) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn allocate_pages(num_pages: usize) -> Result<usize> {
+    // Get access to the system table
+    let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it's registered
+    if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
+
+    // We use 'AllocateAnyPages' because we don't care where the pages
+    // are located
+    let typ = EfiAllocateType::AllocateAnyPages;
+
+    // We allocate from the LoaderData because the UEFI spec
+    // recommends to use that when we are executing as
+    // UEFI application/loader
+    let memory_type = EfiMemoryType::LoaderData;
+
+    // The address we got from `allocate_pages`
+    let mut addr = 0usize;
+
+    unsafe {
+        // Allocate some pages
+        let status: EfiStatus =
+            ((*(*system_table).boot_services).allocate_pages)(
+                typ, memory_type,
+                num_pages, &mut addr).into();
+
+        // Check if the call to `allocate_pages` where successful
+        if status != EfiStatus::Success {
+            return Err(Error::AllocatePages(status));
+        }
+    }
+
+    // Return the address we got from `allocate_pages`
+    Ok(addr)
 }

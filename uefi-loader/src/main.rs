@@ -6,7 +6,7 @@ extern crate elf;
 use core::panic::PanicInfo;
 
 use efi::{ EfiHandle, EfiSystemTablePtr };
-use elf::Elf;
+use elf::{ Elf, ProgramHeaderType };
 
 mod efi;
 
@@ -103,9 +103,33 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     for program_header in elf.program_headers() {
         println!("Program Header: {:#x?}", program_header);
 
+        if program_header.typ() != ProgramHeaderType::Load {
+            continue;
+        }
+
         let memory_size = program_header.memory_size();
         let page_count = memory_size / 0x1000 + 1;
+        let page_count = page_count as usize;
         println!("Needs {} pages", page_count);
+
+        let addr = efi::allocate_pages(page_count)
+            .expect("Failed to allocate pages");
+        println!("Allocated address: {:#x}", addr);
+
+        let ptr = addr as *mut u8;
+
+        unsafe {
+            // Zero out the allocated region
+            core::ptr::write_bytes(ptr, 0, page_count * 0x1000);
+        }
+
+        let data = elf.program_data(&program_header);
+        let data_size = program_header.file_size() as usize;
+
+        unsafe {
+            // Copy the bytes from the program header to the allocated region
+            core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data_size);
+        }
     }
 
     println!("ELF: {:?}", core::str::from_utf8(&KERNEL_BIN[0..4]));
@@ -115,6 +139,8 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
+
     loop {}
 }
