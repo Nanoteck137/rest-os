@@ -5,7 +5,7 @@ extern crate elf;
 
 use core::panic::PanicInfo;
 
-use efi::{ EfiStatus, EfiHandle, EfiSystemTablePtr };
+use efi::{ EfiHandle, EfiSystemTablePtr };
 use elf::Elf;
 
 mod efi;
@@ -40,7 +40,8 @@ impl ConsoleWriter {
             }
         }
 
-        efi::output_string(&buffer);
+        // TODO(patrik): What to do here when an error occur?
+        let _ = efi::output_string(&buffer);
     }
 }
 
@@ -77,7 +78,7 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 static KERNEL_BIN: &'static [u8] = include_bytes!("../../target/kernel.elf");
 
 #[no_mangle]
-fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> EfiStatus {
+fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     unsafe {
         table.register();
     }
@@ -94,7 +95,8 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> EfiStatus {
     //     - Embed inside the bootloader or kernel executable?
     //   - Initrd
 
-    efi::clear_screen();
+    efi::clear_screen()
+        .expect("Failed to clear the screen");
 
     let elf = Elf::parse(&KERNEL_BIN)
         .expect("Failed to parse kernel elf");
