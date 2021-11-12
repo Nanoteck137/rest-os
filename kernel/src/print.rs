@@ -76,7 +76,7 @@ impl core::fmt::Write for EarlyPrintBuffer {
     }
 }
 
-static mut USE_EARLY_PRINTING: bool = true;
+static mut USE_EARLY_PRINTING: bool = false;
 static mut CONSOLE: Option<crate::DeviceLock> = None;
 
 pub fn switch_early_print() {

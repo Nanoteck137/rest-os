@@ -79,12 +79,114 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 
 static KERNEL_BIN: &'static [u8] = include_bytes!("../../target/kernel.elf");
 
+struct FrameAlloc {
+    start_address: usize,
+    num_allocated_frames: usize,
+    max_frames: usize,
+}
+
+impl FrameAlloc {
+    fn new(num_frames: usize) -> Self {
+        let start_address = efi::allocate_pages(num_frames)
+            .expect("Failed to allocate pages for the Frame Allocator");
+        println!("Allocated #{}: {:#x} for the frame allocator",
+                 num_frames, start_address);
+
+        Self {
+            start_address,
+            num_allocated_frames: 0,
+            max_frames: num_frames,
+        }
+    }
+}
+
+impl FrameAlloc {
+    fn alloc(&mut self) -> usize {
+        if self.num_allocated_frames >= self.max_frames {
+            panic!("Out of frames");
+        }
+
+        let result = self.start_address + self.num_allocated_frames * 4096;
+        self.num_allocated_frames += 1;
+
+        result
+    }
+
+    fn alloc_zeroed(&mut self) -> usize {
+        let result = self.alloc();
+        unsafe {
+            core::ptr::write_bytes(result as *mut u8, 0, 4096);
+        }
+
+        result
+    }
+}
+
 /// Read the cr3 register
 unsafe fn read_cr3() -> u64 {
     let cr3: u64;
     asm!("mov {}, cr3", out(reg) cr3);
 
     cr3
+}
+
+unsafe fn map_page_4k(frame_alloc: &mut FrameAlloc,
+                   page_table: u64, vaddr: u64, paddr: u64)
+    -> Option<()>
+{
+    const PAGE_PRESENT: u64 = 1 << 0;
+    const PAGE_WRITE: u64 = 1 << 1;
+    let page_table_ptr = page_table as *mut u64;
+
+    let p1 = ((vaddr >> 12) & 0x1ff) as usize;
+    let p2 = ((vaddr >> 21) & 0x1ff) as usize;
+    let p3 = ((vaddr >> 30) & 0x1ff) as usize;
+    let p4 = ((vaddr >> 39) & 0x1ff) as usize;
+
+    let mut current_table_ptr = page_table_ptr;
+
+    let index = p4;
+    let entry = core::ptr::read(current_table_ptr.add(index));
+    if entry & PAGE_PRESENT != PAGE_PRESENT {
+        let addr = frame_alloc.alloc_zeroed() as u64;
+        let new_entry = addr | PAGE_WRITE | PAGE_PRESENT;
+        core::ptr::write(current_table_ptr.add(index), new_entry);
+
+        current_table_ptr = addr as *mut u64;
+    } else {
+        current_table_ptr = (entry & 0x000ffffffffff000) as *mut u64;
+    }
+
+    let index = p3;
+    let entry = core::ptr::read(current_table_ptr.add(index));
+    if entry & PAGE_PRESENT != PAGE_PRESENT {
+        let addr = frame_alloc.alloc_zeroed() as u64;
+        let new_entry = addr | PAGE_WRITE | PAGE_PRESENT;
+        core::ptr::write(current_table_ptr.add(index), new_entry);
+
+        current_table_ptr = addr as *mut u64;
+    } else {
+        current_table_ptr = (entry & 0x000ffffffffff000) as *mut u64;
+    }
+
+    let index = p2;
+    let entry = core::ptr::read(current_table_ptr.add(index));
+    if entry & PAGE_PRESENT != PAGE_PRESENT {
+        let addr = frame_alloc.alloc_zeroed() as u64;
+        let new_entry = addr | PAGE_WRITE | PAGE_PRESENT;
+        core::ptr::write(current_table_ptr.add(index), new_entry);
+
+        current_table_ptr = addr as *mut u64;
+    } else {
+        current_table_ptr = (entry & 0x000ffffffffff000) as *mut u64;
+    }
+
+    let index = p1;
+    // let entry = core::ptr::read(current_table_ptr.add(index));
+    let entry = paddr | PAGE_WRITE | PAGE_PRESENT;
+    core::ptr::write(current_table_ptr.add(index), entry);
+
+    Some(())
 }
 
 #[no_mangle]
@@ -105,12 +207,16 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     //     - Read from a file?
     //     - Embed inside the bootloader or kernel executable?
     //   - Initrd
+    //   - Early identity map of physical memory
+    //   - Framebuffer
 
     efi::clear_screen()
         .expect("Failed to clear the screen");
 
     let cr3 = unsafe { read_cr3() };
     println!("CR3: {:#x}", cr3);
+
+    let mut frame_alloc = FrameAlloc::new(512);
 
     let elf = Elf::parse(&KERNEL_BIN)
         .expect("Failed to parse kernel elf");
@@ -122,7 +228,10 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         }
 
         let memory_size = program_header.memory_size();
-        let page_count = memory_size / 0x1000 + 1;
+        let alignment = program_header.alignment();
+        assert!(alignment == 0x1000, "We only support an alignment of 4096");
+
+        let page_count = (memory_size + (alignment - 1)) / alignment;
         let page_count = page_count as usize;
         println!("Needs {} pages", page_count);
 
@@ -147,21 +256,31 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
         // TODO(patrik): Map the pages to the page table
 
-        for index in 0..page_count {
-            let vaddr = program_header.vaddr() + (index * 0x1000) as u64;
-            let paddr = addr + index * 0x1000;
+        for index in (0..memory_size).step_by(4096) {
+            let offset = index;
+            let vaddr = program_header.vaddr() + offset;
+            let paddr = addr as u64 + offset;
 
             println!("We need to map: Vaddr({:#x}) -> Paddr({:#x})",
                      vaddr, paddr);
 
-            // map_page(cr3, vaddr, paddr);
+            unsafe {
+                map_page_4k(&mut frame_alloc, cr3, vaddr, paddr);
+            }
         }
     }
 
-    println!("ELF: {:?}", core::str::from_utf8(&KERNEL_BIN[0..4]));
-    println!("Hello World: {:#x?}", KERNEL_BIN.as_ptr());
+    let ptr = 0xffffffff80000000 as *const u32;
+    println!("Value: {:#x}", unsafe { ptr.read() });
 
-    loop {}
+    let entry_point = elf.entry();
+    println!("ELF Entry point: {:#x}", entry_point);
+
+    type KernelEntry = extern "sysv64" fn(multiboot_structure: u64) -> !;
+
+    let entry: KernelEntry = unsafe { core::mem::transmute(entry_point) };
+
+    unsafe { (entry)(0) }
 }
 
 #[panic_handler]

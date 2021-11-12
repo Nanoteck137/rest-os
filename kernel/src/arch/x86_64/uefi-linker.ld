@@ -4,34 +4,32 @@ KERNEL_VMA = 0xffffffff80000000;
 
 PHDRS {
 	text PT_LOAD FLAGS(5);
+    rodata PT_LOAD FLAGS(4);
 	data PT_LOAD FLAGS(6);
 }
 
 SECTIONS {
     . = KERNEL_VMA;
 
-    .text :
+    .text BLOCK(4K) : ALIGN(4K)
     {
         *(.text .text.*)
     } :text
 
-    .rodata :
+    .rodata BLOCK(4K) : ALIGN(4K)
     {
          *(.rodata .rodata.*)
-    }
+    } :rodata
 
-    . = ALIGN(0x1000);
-
-    .data :
+    .data BLOCK(4K) : ALIGN(4K)
     {
          *(.data .data.*)
     } :data
 
-    .bss :
+    .bss BLOCK(4K) : ALIGN(4K)
     {
         *(.bss .bss.*)
     }
 
-    . = ALIGN(0x1000);
     _end = .;
 }
