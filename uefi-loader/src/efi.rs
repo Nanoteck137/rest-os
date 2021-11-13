@@ -2,10 +2,10 @@
 //! Spec: https://uefi.org/sites/default/files/resources/UEFI_Spec_2_9_2021_03_18.pdf
 
 // TODO(patrik):
-//   - Make custom error structure
-//   - Convert EfiStatus to custom error
 
 use core::sync::atomic::{ Ordering, AtomicPtr };
+
+const PAGE_SIZE: usize = 0x1000;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -16,6 +16,11 @@ static SYSTEM_TABLE: AtomicPtr<EfiSystemTable> =
 pub enum Error {
     SystemTableNotRegistered,
     AllocatePages(EfiStatus),
+    MemoryMap(EfiStatus),
+
+    ByteBufferTooSmall,
+    UnknownMemoryType(u64),
+    UnknownMemoryAttribute(u64),
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -30,7 +35,7 @@ enum EfiAllocateType {
 #[derive(Copy, Clone, PartialEq, Debug)]
 #[allow(dead_code)]
 #[repr(C)]
-enum EfiMemoryType {
+pub enum EfiMemoryType {
     ReservedMemoryType,
     LoaderCode,
     LoaderData,
@@ -49,6 +54,67 @@ enum EfiMemoryType {
     PalCode,
     PersistentMemory,
     UnacceptedMemoryType
+}
+
+impl TryFrom<u64> for EfiMemoryType {
+    type Error = Error;
+    fn try_from(value: u64) -> Result<Self> {
+        match value {
+            0 => Ok(Self::ReservedMemoryType),
+            1 => Ok(Self::LoaderCode),
+            2 => Ok(Self::LoaderData),
+            3 => Ok(Self::BootServicesCode),
+            4 => Ok(Self::BootServicesData),
+            5 => Ok(Self::RuntimeServicesCode),
+            6 => Ok(Self::RuntimeServicesData),
+            7 => Ok(Self::ConventionalMemory),
+            8 => Ok(Self::UnusableMemory),
+            9 => Ok(Self::ACPIReclaimMemory),
+
+            10 => Ok(Self::ACPIMemoryNVS),
+            11 => Ok(Self::MemoryMappedIO),
+            12 => Ok(Self::MemoryMappedIOPortSpace),
+
+            13 => Ok(Self::PalCode),
+            14 => Ok(Self::PersistentMemory),
+            15 => Ok(Self::UnacceptedMemoryType),
+
+            _ => Err(Error::UnknownMemoryType(value)),
+        }
+    }
+}
+
+bitflags! {
+    #[repr(transparent)]
+    pub struct EfiMemoryAttribute: u64 {
+        const UC  = 0x0000000000000001;
+        const WC  = 0x0000000000000002;
+        const WT  = 0x0000000000000004;
+        const WB  = 0x0000000000000008;
+        const UCE = 0x0000000000000010;
+        const WP  = 0x0000000000001000;
+
+        const RP = 0x0000000000002000;
+        const XP = 0x0000000000004000;
+        const NV = 0x0000000000008000;
+
+        const MORE_RELIABLE = 0x0000000000010000;
+        const RO            = 0x0000000000020000;
+        const SP            = 0x0000000000040000;
+
+        const CPU_CRYPTO = 0x0000000000080000;
+        const RUNTIME    = 0x8000000000000000;
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+struct EfiMemoryDescriptor {
+    typ: u32,
+    physical_start: u64,
+    virtual_start: u64,
+    num_pages: u64,
+    attribute: u64,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -317,10 +383,17 @@ struct EfiBootServices {
     raise_tpl: usize,
     restore_tpl: usize,
 
-    allocate_pages: unsafe extern fn(EfiAllocateType, EfiMemoryType,
-                                     usize, &mut usize) -> EfiStatusCode,
+    allocate_pages: unsafe extern fn(EfiAllocateType,
+                                     EfiMemoryType,
+                                     usize,
+                                     &mut usize) -> EfiStatusCode,
     free_pages: usize,
-    get_memory_map: usize,
+    get_memory_map: unsafe extern fn(memory_map_size: *mut usize,
+                                     memory_map: *mut u8,
+                                     map_key: *mut usize,
+                                     descriptor_size: *mut usize,
+                                     descriptor_version: *mut u32)
+                                        -> EfiStatusCode,
     allocate_pool: usize,
     free_pool: usize,
 
@@ -468,4 +541,88 @@ pub fn allocate_pages(num_pages: usize) -> Result<usize> {
 
     // Return the address we got from `allocate_pages`
     Ok(addr)
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct MemoryDescriptor {
+    typ: EfiMemoryType,
+    start: u64,
+    length: u64,
+    attribute: EfiMemoryAttribute
+}
+
+impl MemoryDescriptor {
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < core::mem::size_of::<EfiMemoryAttribute>() {
+            return Err(Error::ByteBufferTooSmall);
+        }
+
+        let descriptor = unsafe {
+            core::ptr::read(bytes.as_ptr() as *const EfiMemoryDescriptor)
+        };
+
+        let typ = EfiMemoryType::try_from(descriptor.typ as u64)?;
+        let attribute = EfiMemoryAttribute::from_bits(descriptor.attribute)
+            .ok_or(Error::UnknownMemoryAttribute(descriptor.attribute))?;
+
+        let start = descriptor.physical_start;
+        let length = descriptor.num_pages * PAGE_SIZE as u64;
+
+        Ok(Self {
+            typ,
+            start,
+            length,
+            attribute
+        })
+    }
+
+    pub fn typ(&self) -> EfiMemoryType {
+        self.typ
+    }
+
+    pub fn start(&self) -> u64 {
+        self.start
+    }
+
+    pub fn end(&self) -> u64 {
+        self.start + self.length
+    }
+
+    pub fn length(&self) -> u64 {
+        self.length
+    }
+
+    pub fn attribute(&self) -> EfiMemoryAttribute {
+        self.attribute
+    }
+}
+
+pub fn memory_map(buffer: &mut [u8]) -> Result<(usize, usize, usize)> {
+    // Get access to the system table
+    let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it's registered
+    if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
+
+    let mut memory_map_size: usize = buffer.len();
+    let mut map_key: usize = 0;
+    let mut descriptor_size: usize = 0;
+    let mut descriptor_version: u32 = 0;
+
+    unsafe {
+        let status: EfiStatus =
+            ((*(*system_table).boot_services).get_memory_map)(
+                core::ptr::addr_of_mut!(memory_map_size),
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(map_key),
+                core::ptr::addr_of_mut!(descriptor_size),
+                core::ptr::addr_of_mut!(descriptor_version)).into();
+        if status != EfiStatus::Success {
+            return Err(Error::MemoryMap(status));
+        }
+    }
+
+    crate::println!("Memory map size: {} bytes", memory_map_size);
+
+    Ok((memory_map_size, map_key, descriptor_size))
 }

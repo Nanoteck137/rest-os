@@ -3,6 +3,10 @@
 #![no_std]
 #![no_main]
 
+// TODO(patrik):
+//   - Go through the code and comment stuff
+
+#[macro_use] extern crate bitflags;
 extern crate elf;
 
 use core::panic::PanicInfo;
@@ -199,6 +203,7 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     // TODO(patrik): Setup the kernel page table
     // TODO(patrik): Load in the kernel
     // TODO(patrik): Load the initrd
+    // TODO(patrik): Code cleanup
     // TODO(patrik): Create some kind of structure to pass in to the kernel
     //   - Starting Heap
     //   - Memory map
@@ -221,8 +226,6 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let elf = Elf::parse(&KERNEL_BIN)
         .expect("Failed to parse kernel elf");
     for program_header in elf.program_headers() {
-        println!("Program Header: {:#x?}", program_header);
-
         if program_header.typ() != ProgramHeaderType::Load {
             continue;
         }
@@ -233,11 +236,9 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
         let page_count = (memory_size + (alignment - 1)) / alignment;
         let page_count = page_count as usize;
-        println!("Needs {} pages", page_count);
 
         let addr = efi::allocate_pages(page_count)
             .expect("Failed to allocate pages");
-        println!("Allocated address: {:#x}", addr);
 
         let ptr = addr as *mut u8;
 
@@ -254,15 +255,10 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
             core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data_size);
         }
 
-        // TODO(patrik): Map the pages to the page table
-
         for index in (0..memory_size).step_by(4096) {
             let offset = index;
             let vaddr = program_header.vaddr() + offset;
             let paddr = addr as u64 + offset;
-
-            println!("We need to map: Vaddr({:#x}) -> Paddr({:#x})",
-                     vaddr, paddr);
 
             unsafe {
                 map_page_4k(&mut frame_alloc, cr3, vaddr, paddr);
@@ -270,17 +266,44 @@ fn efi_main(_image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         }
     }
 
-    let ptr = 0xffffffff80000000 as *const u32;
-    println!("Value: {:#x}", unsafe { ptr.read() });
+    let mut buffer = [0; 4096];
 
-    let entry_point = elf.entry();
-    println!("ELF Entry point: {:#x}", entry_point);
+    let (memory_map_size, _, descriptor_size) = efi::memory_map(&mut buffer)
+        .expect("Failed to retrive the memory map");
 
-    type KernelEntry = extern "sysv64" fn(multiboot_structure: u64) -> !;
+    for offset in (0..memory_map_size).step_by(descriptor_size) {
+        let descriptor = efi::MemoryDescriptor::parse(&buffer[offset..])
+            .expect("Failed to parse memory descriptor");
+
+        let start = descriptor.start();
+        let length = descriptor.length();
+        let end = descriptor.end() - 1;
+
+        print!("[0x{:016x}-0x{:016x}] ", start, end);
+
+        if length >= 1 * 1024 * 1024 * 1024 {
+            print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
+        } else if length >= 1 * 1024 * 1024 {
+            print!("{:>4} MiB ", length / 1024 / 1024);
+        } else if length >= 1 * 1024 {
+            print!("{:>4} KiB ", length / 1024);
+        } else {
+            print!("{:>4} B   ", length);
+        }
+
+        print!("{:?}", descriptor.typ());
+        println!();
+    }
+
+    // TODO(patrik): Exit boot services here
+
+    type KernelEntry =
+        unsafe extern "sysv64" fn(multiboot_structure: u64) -> !;
 
     let entry: KernelEntry = unsafe { core::mem::transmute(entry_point) };
-
-    unsafe { (entry)(0) }
+    unsafe {
+        (entry)(0);
+    }
 }
 
 #[panic_handler]
