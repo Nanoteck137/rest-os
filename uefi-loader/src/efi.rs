@@ -1,5 +1,6 @@
 //! Module to handle all the EFI interfaces
-//! Spec: https://uefi.org/sites/default/files/resources/UEFI_Spec_2_9_2021_03_18.pdf
+//!
+//! Spec: <https://uefi.org/sites/default/files/resources/UEFI_Spec_2_9_2021_03_18.pdf>
 
 // TODO(patrik):
 
@@ -17,6 +18,7 @@ pub enum Error {
     SystemTableNotRegistered,
     AllocatePages(EfiStatus),
     MemoryMap(EfiStatus),
+    ExitBootServices(EfiStatus),
 
     ByteBufferTooSmall,
     UnknownMemoryType(u64),
@@ -355,6 +357,8 @@ impl From<EfiStatusCode> for EfiStatus {
 #[repr(transparent)]
 pub struct EfiStatusCode(usize);
 
+// TODO(patrik): Should EfiHandle derive from Copy and Clone?
+#[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct EfiHandle(usize);
 
@@ -418,7 +422,8 @@ struct EfiBootServices {
     start_image: usize,
     exit: usize,
     unload_image: usize,
-    exit_boot_services: usize,
+    exit_boot_services: unsafe extern fn(image_handle: EfiHandle,
+                                         map_key: usize) -> EfiStatusCode,
 
     get_next_monotonic_count: usize,
     stall: usize,
@@ -622,7 +627,27 @@ pub fn memory_map(buffer: &mut [u8]) -> Result<(usize, usize, usize)> {
         }
     }
 
-    crate::println!("Memory map size: {} bytes", memory_map_size);
-
     Ok((memory_map_size, map_key, descriptor_size))
+}
+
+pub fn exit_boot_services(image_handle: EfiHandle, map_key: usize)
+    -> Result<()>
+{
+    // Get access to the system table
+    let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it's registered
+    if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
+
+    unsafe {
+        let status: EfiStatus =
+            ((*(*system_table).boot_services).exit_boot_services)(
+                image_handle,
+                map_key).into();
+        if status != EfiStatus::Success {
+            return Err(Error::ExitBootServices(status));
+        }
+    }
+
+    Ok(())
 }
