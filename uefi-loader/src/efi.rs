@@ -6,16 +6,21 @@
 
 use core::sync::atomic::{ Ordering, AtomicPtr };
 
+/// Constant for the page size
 const PAGE_SIZE: usize = 0x1000;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
+/// The Registered EFI system table pointer
 static SYSTEM_TABLE: AtomicPtr<EfiSystemTable> =
     AtomicPtr::new(core::ptr::null_mut());
 
+/// Errors defined by the EFI module
 #[derive(Debug)]
 pub enum Error {
     SystemTableNotRegistered,
+    ClearScreen(EfiStatus),
+    OutputString(EfiStatus),
     AllocatePages(EfiStatus),
     MemoryMap(EfiStatus),
     ExitBootServices(EfiStatus),
@@ -25,41 +30,99 @@ pub enum Error {
     UnknownMemoryAttribute(u64),
 }
 
+/// Types of allocations we can do inside for example
+/// [`EfiBootServices::allocate_pages`]
 #[derive(Copy, Clone, PartialEq, Debug)]
 #[allow(dead_code)]
 #[repr(C)]
 enum EfiAllocateType {
+    /// Allocation requests of Type AllocateAnyPages allocate any available
+    /// range of pages that satisfies the request. On input, the address
+    /// pointed to by Memory is ignored.
     AllocateAnyPages,
+
+    /// Allocation requests of Type AllocateMaxAddress allocate any available
+    /// range of pages whose uppermost address is less than or equal to
+    /// the address pointed to by Memory on input.
     AllocateMaxAddress,
+
+    /// Allocation requests of Type AllocateAddress allocate pages at the
+    /// address pointed to by Memory on input.
     AllocateAddress,
 }
 
+/// Types of memory regions we can for example allocate from
 #[derive(Copy, Clone, PartialEq, Debug)]
 #[allow(dead_code)]
 #[repr(C)]
 pub enum EfiMemoryType {
+    /// Not usable
     ReservedMemoryType,
+
+    /// The code portions of a loaded UEFI application
     LoaderCode,
+
+    /// The data portions of a loaded UEFI application and the default data
+    /// allocation type used by a UEFI application to allocate pool memory
     LoaderData,
+
+    /// The code portions of a loaded UEFI Boot Service Driver
     BootServicesCode,
+
+    /// The data portions of a loaded UEFI Boot Serve Driver, and the default
+    /// data allocation type used by a UEFI Boot Service Driver to allocate
+    /// pool memory
     BootServicesData,
+
+    /// The code portions of a loaded UEFI Runtime Driver
     RuntimeServicesCode,
+
+    /// The data portions of a loaded UEFI Runtime Driver and the default
+    /// data allocation type used by a UEFI Runtime Driver to allocate
+    /// pool memory.
     RuntimeServicesData,
+
+    /// Free (unallocated) memory
     ConventionalMemory,
+
+    /// Memory in which errors have been detected
     UnusableMemory,
+
+    /// Memory that holds the ACPI tables
     ACPIReclaimMemory,
 
+    /// Address space reserved for use by the firmware
     ACPIMemoryNVS,
+
+    /// Used by system firmware to request that a memory-mapped IO region
+    /// be mapped by the OS to a virtual address so it can be accessed by
+    /// EFI runtime services
     MemoryMappedIO,
+
+    /// System memory-mapped IO region that is used to translate memory cycles
+    /// to  IO cycles by the processor
     MemoryMappedIOPortSpace,
 
+    /// Address space reserved by the firmware for code that is part of the
+    /// processor
     PalCode,
+
+    /// A memory region that operates as EfiConventionalMemory.
+    /// However, it happens to also support byte-addressable non-volatility
     PersistentMemory,
+
+    /// A memory region that represents unaccepted memory, that must be
+    /// accepted by the boot target before it can be used. Unless otherwise
+    /// noted, all other EFI memory types are accepted. For platforms that
+    /// support unaccepted memory, all unaccepted valid memory will be
+    /// reported as unaccepted in the memory map. Unreported physical address
+    /// ranges must be treated as not-present memory.
     UnacceptedMemoryType
 }
 
 impl TryFrom<u64> for EfiMemoryType {
     type Error = Error;
+
     fn try_from(value: u64) -> Result<Self> {
         match value {
             0 => Ok(Self::ReservedMemoryType),
@@ -87,38 +150,112 @@ impl TryFrom<u64> for EfiMemoryType {
 }
 
 bitflags! {
+    /// Attributes of the memory region that describe the bit mask of
+    /// capabilities for that memory region, and not necessarily the current
+    /// settings for that memory region.
     #[repr(transparent)]
     pub struct EfiMemoryAttribute: u64 {
+        /// Memory cacheability attribute: The memory region supports being
+        /// configured as not cacheable
         const UC  = 0x0000000000000001;
+
+        /// Memory cacheability attribute: The memory region supports being
+        /// configured as write combining.
         const WC  = 0x0000000000000002;
+
+        /// Memory cacheability attribute: The memory region supports being
+        /// configured as cacheable with a "write through" policy.
+        /// Writes that hit in the cache will also be written to main memory.
         const WT  = 0x0000000000000004;
+
+        /// Memory cacheability attribute: The memory region supports being
+        /// configured as cacheable with a "write back" policy.
+        /// Reads and writes that hit in the cache do not propagate to
+        /// main memory. Dirty data is written back to main memory when a
+        /// new cache line is allocated.
         const WB  = 0x0000000000000008;
+
+        /// Memory cacheability attribute: The memory region supports being
+        /// configured as not cacheable, exported, and supports the
+        /// "fetch and add" semaphore mechanism.
         const UCE = 0x0000000000000010;
+
+        /// Physical memory protection attribute: The memory region supports
+        /// being configured as write-protected by system hardware.
+        /// This is typically used as a cacheability attribute today.
+        /// The memory region supports being configured as cacheable with
+        /// a "write protected" policy. Reads come from cache lines when
+        /// possible, and read misses cause cache fills. Writes are
+        /// propagated to the system bus and cause corresponding cache lines
+        /// on all processors on the bus to be invalidated.
         const WP  = 0x0000000000001000;
 
+        /// Physical memory protection attribute: The memory region supports
+        /// being configured as read-protected by system hardware.
         const RP = 0x0000000000002000;
+
+        /// Physical memory protection attribute: The memory region supports
+        /// being configured so it is protected by system hardware from
+        /// executing code.
         const XP = 0x0000000000004000;
+
+        /// Runtime memory attribute: The memory region refers to persistent
+        /// memory
         const NV = 0x0000000000008000;
 
+        /// The memory region provides higher reliability relative to other
+        /// memory in the system. If all memory has the same reliability,
+        /// then this bit is not used.
         const MORE_RELIABLE = 0x0000000000010000;
+
+        /// Physical memory protection attribute: The memory region supports
+        /// making this memory range read-only by system hardware.
         const RO            = 0x0000000000020000;
+
+        /// Specific-purpose memory (SPM). The memory is earmarked for
+        /// specific purposes such as for specific device drivers or
+        /// applications. The SPM attribute serves as a hint to the OS to
+        /// avoid allocating this memory for core OS data or code that can
+        /// not be relocated. Prolonged use of this memory for purposes other
+        /// than the intended purpose may result in suboptimal platform
+        /// performance.
         const SP            = 0x0000000000040000;
 
+        /// If this flag is set, the memory region is capable of being
+        /// protected with the CPU's memory cryptographic capabilities.
+        /// If this flag is clear, the memory region is not capable of being
+        /// protected with the CPU's memory cryptographic capabilities or
+        /// the CPU does not support CPU memory cryptographic capabilities
         const CPU_CRYPTO = 0x0000000000080000;
+
+        /// Runtime memory attribute: The memory region needs to be given a
+        /// virtual mapping by the operating system when
+        /// SetVirtualAddressMap() is called
         const RUNTIME    = 0x8000000000000000;
     }
 }
 
+/// EFI Memory Descriptor is for describing diffrent memory regions
 #[derive(Copy, Clone)]
 #[repr(C)]
 struct EfiMemoryDescriptor {
+    /// Type of the memory region
     typ: u32,
+
+    /// Physical address of the first byte in the memory region
     physical_start: u64,
+
+    /// Virtual address of the first byte in the memory region
     virtual_start: u64,
+
+    /// Number of 4 KiB pages in the memory region
     num_pages: u64,
+
+    /// Attributes of the memory region
     attribute: u64,
 }
 
+/// EFI standard warnings
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EfiWarning {
     /// The string contained one or more characters that the device could
@@ -166,6 +303,7 @@ impl From<u64> for EfiWarning {
     }
 }
 
+/// EFI standard errors
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EfiError {
     /// The image failed to load.
@@ -318,6 +456,7 @@ impl From<u64> for EfiError {
     }
 }
 
+/// Status for the EFI interfaces, converted from [`EfiStatusCode`]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EfiStatus {
     Success,
@@ -354,32 +493,50 @@ impl From<EfiStatusCode> for EfiStatus {
     }
 }
 
+/// EFI status code returned by most EFI inteface functions
 #[repr(transparent)]
 pub struct EfiStatusCode(usize);
 
 // TODO(patrik): Should EfiHandle derive from Copy and Clone?
+/// EFI handle
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct EfiHandle(usize);
 
+/// Holds a pointer to the [`EfiSystemTable`], then later can be registered
+/// by the [`EfiSystemTablePtr::register`] function to register this system
+/// table to the global system table handle
 #[repr(transparent)]
 pub struct EfiSystemTablePtr(*mut EfiSystemTable);
 
 impl EfiSystemTablePtr {
+    /// Register a EfiSystemTablePtr to the global system table handle
     pub unsafe fn register(self) {
         SYSTEM_TABLE.store(self.0, Ordering::SeqCst);
     }
 }
 
+/// EFI Table header
 #[repr(C)]
 struct EfiTableHeader {
+    ///A 64-bit signature that identifies the type of table that follows
     signature: u64,
+
+    /// The revision of the EFI Specification to which this table conforms
     revision: u32,
+
+    /// The size, in bytes, of the entire table including the
+    /// [`EfiTableHeader`].
     header_size: u32,
+
+    /// The 32-bit CRC for the entire table
     crc32: u32,
+
+    /// Reserved field that must be set to 0
     reserved: u32,
 }
 
+/// EFI BootServices table
 #[repr(C)]
 struct EfiBootServices {
     header: EfiTableHeader,
@@ -450,6 +607,7 @@ struct EfiBootServices {
     create_event_ex: usize,
 }
 
+/// EFI Simple Text Output Protocol
 #[repr(C)]
 struct EfiSimpleTextOutputProtocol {
     reset: usize,
@@ -466,6 +624,7 @@ struct EfiSimpleTextOutputProtocol {
     mode: usize,
 }
 
+/// EFI System table
 #[repr(C)]
 struct EfiSystemTable {
     header: EfiTableHeader,
@@ -489,29 +648,67 @@ struct EfiSystemTable {
     configuration_table: usize
 }
 
+/// Clears the screen of the EFI stdout
+///
+/// # Returns
+///
+/// * `Ok(())` - The clearing of the screen was successful
+/// * `Err` - The clearing of the screen failed
 pub fn clear_screen() -> Result<()> {
     let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
     if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
 
     unsafe {
-        ((*(*system_table).con_out).clear_screen)((*system_table).con_out);
+        let status: EfiStatus =
+            ((*(*system_table).con_out).clear_screen)(
+                (*system_table).con_out).into();
+
+        if status != EfiStatus::Success {
+            return Err(Error::ClearScreen(status));
+        }
     }
 
     Ok(())
 }
 
+/// Outputs a UTF-16 string to the EFI stdout
+///
+/// # Arguments
+///
+/// * `buffer` - The UTF-16 string buffer to be printed
+///
+/// # Returns
+///
+/// * `Ok(())` - The print was successful
+/// * `Err` - The print failed
 pub fn output_string(buffer: &[u16]) -> Result<()> {
     let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
     if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
 
     unsafe {
-        ((*(*system_table).con_out).output_string)((*system_table).con_out,
-                                                   buffer.as_ptr());
+        let status: EfiStatus =
+            ((*(*system_table).con_out).output_string)(
+                (*system_table).con_out,
+                buffer.as_ptr()).into();
+
+        if status != EfiStatus::Success {
+            return Err(Error::OutputString(status));
+        }
     }
 
     Ok(())
 }
 
+/// Allocates a contiguous number of pages from the `LoaderData`
+///
+/// # Arguments
+///
+/// * `num_pages` - The number of pages to allocate
+///
+/// # Returns
+/// * `Ok(addr)` - If the allocation was succeccful then we return the address
+///    of the first page.
+/// * `Err` - If the allocation failed then we return a error
 pub fn allocate_pages(num_pages: usize) -> Result<usize> {
     // Get access to the system table
     let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
@@ -548,15 +745,29 @@ pub fn allocate_pages(num_pages: usize) -> Result<usize> {
     Ok(addr)
 }
 
+/// Memory Descriptor describe a region of memory parsed from
+/// EfiMemoryDescriptor
 #[derive(Copy, Clone, Debug)]
 pub struct MemoryDescriptor {
+    /// The type of memory region
     typ: EfiMemoryType,
+
+    /// The start address of the memory region (physical address)
     start: u64,
+
+    /// The length of the memory region (bytes)
     length: u64,
+
+    /// The attributes of the memory region
     attribute: EfiMemoryAttribute
 }
 
 impl MemoryDescriptor {
+    /// Parses a byte buffer and returns the MemoryDescriptor
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - A reference to a slice of bytes to parse
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < core::mem::size_of::<EfiMemoryAttribute>() {
             return Err(Error::ByteBufferTooSmall);
@@ -581,27 +792,45 @@ impl MemoryDescriptor {
         })
     }
 
+    /// Returns the type of the region
     pub fn typ(&self) -> EfiMemoryType {
         self.typ
     }
 
+    /// Returns the start address of the region (physcial address)
     pub fn start(&self) -> u64 {
         self.start
     }
 
+    /// Returns the end address of the byte +1 past the region
+    /// (physcial address)
     pub fn end(&self) -> u64 {
         self.start + self.length
     }
 
+    /// Returns the length of the regoin (bytes)
     pub fn length(&self) -> u64 {
         self.length
     }
 
+    /// Returns the attributes of the region
     pub fn attribute(&self) -> EfiMemoryAttribute {
         self.attribute
     }
 }
 
+/// Retrive the current memory map from EFI
+///
+/// # Arguments
+///
+/// * `buffer` - The buffer to fill the memory map descriptor data
+///
+/// # Returns
+///
+/// * `Ok((memory_map_size, map_key, descriptor_size))` - If the retrival of
+///    the memory map was successful then we return a tuple with the
+///    `memory_map_size`, `map_key` and the `descriptor_size`
+/// * `Err` - If we failed to retrive the memory we return the error
 pub fn memory_map(buffer: &mut [u8]) -> Result<(usize, usize, usize)> {
     // Get access to the system table
     let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
@@ -630,6 +859,17 @@ pub fn memory_map(buffer: &mut [u8]) -> Result<(usize, usize, usize)> {
     Ok((memory_map_size, map_key, descriptor_size))
 }
 
+/// Exit the boot services
+///
+/// # Arguments
+///
+/// * `image_handle` - The current image handle
+/// * `map_key` - The newest map key retrived from the memory map
+///
+/// # Returns
+///
+/// * `Ok(())` - If we succeeded to exit the boot services
+/// * `Err` - If we failed to exit the boot services
 pub fn exit_boot_services(image_handle: EfiHandle, map_key: usize)
     -> Result<()>
 {
