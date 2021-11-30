@@ -289,6 +289,47 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     // Parse the kernel executable
     let elf = Elf::parse(&KERNEL_EXECUTABLE)
         .expect("Failed to parse kernel executable");
+
+    let total_page_count = {
+        let mut total = 0;
+        for program_header in elf.program_headers() {
+            // If the program header is not the type of `ProgramHeaderType::Load`
+            // then just continue to the next one
+            if program_header.typ() != ProgramHeaderType::Load {
+                continue;
+            }
+
+            // Get the size in memory this program header takes up
+            let memory_size = program_header.memory_size();
+            // Get the alignment
+            let alignment = program_header.alignment();
+            // NOTE(patrik): We only support a alignment of 0x1000 or 4096 because
+            // it's easier to map the pages inside the page table. but in the
+            // future we could supoprt other alignment but for now we know the
+            // alignment is always gonna be 4096 for this kernel
+            assert!(alignment == 0x1000, "We only support an alignment of 4096");
+
+            // Calculate the number of pages
+            let page_count = (memory_size + (alignment - 1)) / alignment;
+            let page_count = page_count as usize;
+
+            total += page_count;
+        };
+
+        total
+    };
+
+    let stack_size = (1 * 1024 * 1024) / 4096;
+    let total_page_count = total_page_count + stack_size;
+
+    // Allocate all the pages the kernel executable need
+    let kernel_start = efi::allocate_pages(total_page_count)
+        .expect("Failed to allocate pages for kernel executable");
+
+    let kernel_end = kernel_start + total_page_count * 4096;
+
+    let mut current_offset = 0;
+
     // Loop through all the program headers
     for program_header in elf.program_headers() {
         // If the program header is not the type of `ProgramHeaderType::Load`
@@ -312,8 +353,8 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         let page_count = page_count as usize;
 
         // Allocate the necessary pages for the program header
-        let addr = efi::allocate_pages(page_count)
-            .expect("Failed to allocate pages");
+        let addr = kernel_start + current_offset;
+        current_offset += page_count * 4096;
 
         // Create a pointer from the address we got from `efi::allocate_pages`
         let ptr = addr as *mut u8;
@@ -325,12 +366,15 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
         // Get access to the program header data so we can copy over them to
         // the new allocated region
-        let data = elf.program_data(&program_header);
-        let data_size = program_header.file_size() as usize;
+        if program_header.file_size() > 0 {
+            let data = elf.program_data(&program_header);
+            let data_size = program_header.file_size() as usize;
 
-        unsafe {
-            // Copy the bytes from the program header to the allocated region
-            core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data_size);
+            unsafe {
+                // Copy the bytes from the program header to the allocated
+                // region
+                core::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data_size);
+            }
         }
 
         // Loop through all the pages and map them in at the correct
@@ -349,6 +393,19 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         }
     }
 
+    let stack_start = kernel_start + current_offset;
+    let stack_end = stack_start + (stack_size * 4096);
+
+    /*
+    for index in (0..(stack_size * 4096)).step_by(4096) {
+        let vaddr = ;
+        let paddr = ;
+        unsafe {
+            map_page_4k(&mut frame_alloc, cr3, vaddr, paddr);
+        }
+    }
+    */
+
     // Create a buffer for the efi memory map
     let mut buffer = [0; 4096];
 
@@ -361,23 +418,13 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     // yet because we lose the ability to print stuff
 
     /*
-    let (memory_map_size, descriptor_size)  = loop {
-        let (memory_map_size, map_key, descriptor_size) =
-            efi::memory_map(&mut buffer)
-                .expect("Failed to retrive the memory map");
-
-        match efi::exit_boot_services(image_handle, map_key) {
-            Ok(()) => break (memory_map_size, descriptor_size),
-            Err(status) => continue
-        }
-    };
     */
 
-    let heap_addr = BootPhysicalAddress::new(0);
-    let heap_length = 0;
+    let kernel_start = BootPhysicalAddress::new(kernel_start as u64);
+    let kernel_end = BootPhysicalAddress::new(kernel_end as u64);
     let initrd_addr = BootPhysicalAddress::new(0);
     let initrd_length = 0;
-    let mut boot_info = BootInfo::new(heap_addr, heap_length,
+    let mut boot_info = BootInfo::new(kernel_start, kernel_end,
                                       initrd_addr, initrd_length);
 
     // Loop through the memory map and print out the infomation
@@ -431,7 +478,7 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         boot_info.add_memory_map_entry(entry);
     }
 
-    println!("Boot Info: {:#x?}", boot_info);
+    // println!("Boot Info: {:#x?}", boot_info);
 
     // TODO(patirk): Static assert
     assert!(core::mem::size_of::<BootInfo>() <= 4096,
@@ -442,6 +489,19 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     unsafe {
         core::ptr::write(boot_info_ptr, boot_info);
     }
+
+    println!("Test: {:#x}", 0xffffffff80000000 + current_offset + 1 * 1024 * 1024);
+
+    let (memory_map_size, descriptor_size)  = loop {
+        let (memory_map_size, map_key, descriptor_size) =
+            efi::memory_map(&mut buffer)
+                .expect("Failed to retrive the memory map");
+
+        match efi::exit_boot_services(image_handle, map_key) {
+            Ok(()) => break (memory_map_size, descriptor_size),
+            Err(status) => continue
+        }
+    };
 
     // Create a type for the kernel entry point
     type KernelEntry =
@@ -455,8 +515,20 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
     // Call into the kernel
     unsafe {
-        (entry)(boot_info_addr as u64);
+        // (entry)(boot_info_addr as u64);
     }
+
+    unsafe {
+        asm!("
+             /* {1} */
+             mov rdi, {0}
+             mov rsp, 0
+             mov rbp, 0
+             jmp {2}", in(reg) boot_info_addr,
+                       in(reg) (0xffffffff80000000 + current_offset + 1 * 1024),
+                       in(reg) entry_point);
+    }
+    loop {}
 }
 
 /// The panic handler for this application

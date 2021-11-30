@@ -6,6 +6,7 @@ PHDRS {
 	text PT_LOAD FLAGS(5);
     rodata PT_LOAD FLAGS(4);
 	data PT_LOAD FLAGS(6);
+    heap PT_LOAD FLAGS(6);
 }
 
 SECTIONS {
@@ -30,6 +31,13 @@ SECTIONS {
     {
         *(.bss .bss.*)
     }
+
+    .heap BLOCK(4K) : ALIGN(4K)
+    {
+        _heap_start = .;
+        . = . + (1 * 1024 * 1024);
+        _heap_end = .;
+    } :heap
 
     _end = .;
 }

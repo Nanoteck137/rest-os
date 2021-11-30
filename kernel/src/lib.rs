@@ -98,7 +98,7 @@ use process::{ Process };
 use scheduler::Scheduler;
 use cpio::{ CPIO, CPIOKind };
 use elf::{ Elf, ProgramHeaderType };
-use boot::BootInfo;
+use boot::{ BootInfo, BootMemoryMapType };
 
 use arch::x86_64::{ PageTable, PageType };
 
@@ -163,15 +163,12 @@ macro_rules! banner {
     () => (concat!("RestOS Version ", version!(), " ", toolchain!()))
 }
 
-fn display_memory_map(multiboot: &Multiboot) {
-    let memory_map = multiboot.find_memory_map()
-        .expect("Failed to find memory map");
-
+fn display_memory_map(boot_info: &BootInfo) {
     let mut availble_memory = 0;
 
     println!("Memory Map:");
-    for entry in memory_map.iter() {
-        let start = entry.addr();
+    for entry in boot_info.memory_map() {
+        let start = entry.addr().raw();
         let length = entry.length();
         let end = start + length - 1;
 
@@ -189,7 +186,7 @@ fn display_memory_map(multiboot: &Multiboot) {
 
         tprint!("{:?}", entry.typ());
 
-        if entry.typ() == MemoryMapEntryType::Available {
+        if entry.typ() == BootMemoryMapType::Available {
             availble_memory += length;
         }
 
@@ -257,6 +254,8 @@ static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
 // Linker variables
 extern {
     static _end: u32;
+    static _heap_start: u32;
+    static _heap_end: u32;
 }
 
 fn get_kernel_end() -> VirtualAddress {
@@ -266,9 +265,12 @@ fn get_kernel_end() -> VirtualAddress {
 fn heap() -> (VirtualAddress, usize) {
     // The start of the heap is at the end of the kernel image and we get a
     // reference to that from the linker script
-    let heap_start = get_kernel_end();
-    // For now we have 1 MiB of heap we could add more if we need more
-    let heap_size = 1 * 1024 * 1024;
+    let heap_start =
+        unsafe { VirtualAddress(&_heap_start as *const u32 as usize) };
+    let heap_end =
+        unsafe { VirtualAddress(&_heap_end as *const u32 as usize) };
+
+    let heap_size = heap_end.0 - heap_start.0;
 
     (heap_start, heap_size)
 }
@@ -304,20 +306,37 @@ fn kernel_test_thread() {
 
 #[no_mangle]
 pub extern fn kernel_init(boot_info_addr: u64) -> ! {
+    unsafe {
+        arch::force_disable_interrupts();
+    }
     arch::early_initialize();
+
+    let stack: u64;
+    unsafe {
+        asm!("mov {}, rsp", out(reg) stack);
+    }
+    println!("Stack: {:#x}", stack);
 
     let boot_info =
         unsafe { &*(boot_info_addr as *const u64 as *const BootInfo) };
 
     println!("{}", banner!());
 
-    println!("Kernel Boot: {:?}", boot_info);
+    // println!("Kernel Boot: {:?}", boot_info);
+
+    // Initialize the kernel heap
+    initialize_heap();
+
+    display_memory_map(&boot_info);
+
+    mm::initialize(&boot_info);
+    processor::init(0);
+
+    time::initialize();
 
     let multiboot_addr = 0;
     loop {}
 
-    // Initialize the kernel heap
-    initialize_heap();
 
     // Get access to the multiboot structure
     let multiboot = unsafe {
@@ -329,17 +348,14 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     // _display_multiboot_tags(&multiboot);
 
     // Display the memory map from the multiboot structure
-    display_memory_map(&multiboot);
 
+    /*
     let cmd_line = multiboot.find_command_line();
     if let Some(s) = cmd_line {
         println!("Kernel Command Line: {}", s);
     }
+    */
 
-    mm::initialize(PhysicalAddress(multiboot_addr));
-    processor::init(0);
-
-    time::initialize();
 
     let serial_device = SerialDevice {
         ioctl_count: 0,

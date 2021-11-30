@@ -12,6 +12,7 @@ use alloc::sync::{ Arc, Weak };
 use alloc::collections::BTreeMap;
 
 use spin::{ Mutex, RwLock, RwLockWriteGuard };
+use boot::BootInfo;
 
 pub use frame_alloc::{ FrameAllocator, BitmapFrameAllocator };
 pub use heap_alloc::Allocator;
@@ -215,7 +216,7 @@ impl VMRegion {
 }
 
 struct MemoryManager {
-    multiboot_structure: PhysicalAddress,
+    boot_info: BootInfo,
     kernel_regions: BTreeMap<usize, Arc<RwLock<VMRegion>>>,
 
     next_addr: VirtualAddress,
@@ -226,7 +227,7 @@ struct MemoryManager {
 }
 
 impl MemoryManager {
-    fn create_frame_allocator(multiboot: &Multiboot) -> BitmapFrameAllocator {
+    fn create_frame_allocator(boot_info: &BootInfo) -> BitmapFrameAllocator {
         let mut frame_allocator = BitmapFrameAllocator::new();
 
         let (heap_start, heap_size) = crate::heap();
@@ -235,36 +236,31 @@ impl MemoryManager {
             PhysicalAddress(heap_end.0 - KERNEL_TEXT_START.0);
 
         unsafe {
-            frame_allocator.init(multiboot.find_memory_map()
-                .expect("Failed to find memory map"));
+            frame_allocator.init(boot_info.memory_map());
         }
 
         frame_allocator.lock_region(PhysicalAddress(0), 0x4000);
 
         // TODO(patrik): Change this
-        let kernel_start = PhysicalAddress(0x100000);
-        let kernel_end = physical_heap_end;
-        frame_allocator.lock_region(kernel_start,
-                                    kernel_end.0 - kernel_start.0);
+        let kernel_start = boot_info.kernel_start().raw() as usize;
+        let kernel_end = boot_info.kernel_end().raw() as usize;
+        frame_allocator.lock_region(PhysicalAddress(kernel_start),
+                                    kernel_end - kernel_start);
 
         frame_allocator
     }
 
-    fn new(multiboot_structure: PhysicalAddress) -> Self {
+    fn new(boot_info: &BootInfo) -> Self {
         verify_interrupts_disabled!();
 
         // TODO(patrik): We need to refactor this code
         //  - Create a list of ranges for the memory map
 
-        let multiboot = unsafe {
-            Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY, multiboot_structure)
-        };
-
-        let mut frame_allocator = Self::create_frame_allocator(&multiboot);
+        let mut frame_allocator = Self::create_frame_allocator(boot_info);
         let page_table = PageTable::create(&mut frame_allocator);
 
         let mut result = Self {
-            multiboot_structure,
+            boot_info: boot_info.clone(),
             kernel_regions: BTreeMap::new(),
             next_addr: VMALLOC_START,
             frame_allocator,
@@ -286,33 +282,31 @@ impl MemoryManager {
         // TODO(patrik): Map in the kernel text
         // TODO(patrik): Map in physical memory
 
-        let multiboot = unsafe {
-            Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
-                                 self.multiboot_structure)
-        };
-
         let page_table = &mut self.reference_page_table;
 
         unsafe {
             // Search for the highest address inside the memory map so we can
             // map all of the physical memory
             let highest_address = {
-                let memory_map = multiboot.find_memory_map()
-                    .expect("Failed to find memory map");
                 let mut address = 0;
-                for entry in memory_map.iter() {
-                    let end = entry.addr() + entry.length();
+                for entry in self.boot_info.memory_map() {
+                    let end = entry.addr().raw() + entry.length();
                     address = core::cmp::max(address, end);
                 }
 
                 address as usize
             };
 
-            for addr in (KERNEL_TEXT_START.0..KERNEL_TEXT_END.0)
+            let kernel_start = self.boot_info.kernel_start().raw();
+            let kernel_end = self.boot_info.kernel_end().raw();
+            println!("Kernel Bounds: {:#x} - {:#x}", kernel_start, kernel_end);
+
+            for addr in (kernel_start..kernel_end)
                 .step_by(2 * 1024 * 1024)
             {
-                let vaddr = VirtualAddress(addr);
-                let paddr = PhysicalAddress(addr - KERNEL_TEXT_START.0);
+                let addr = addr as usize;
+                let vaddr = VirtualAddress(addr + KERNEL_TEXT_START.0);
+                let paddr = PhysicalAddress(addr);
                 page_table.map_raw(&mut self.frame_allocator,
                                    &BOOT_PHYSICAL_MEMORY,
                                    vaddr, paddr, PageType::Page2M,
@@ -326,12 +320,14 @@ impl MemoryManager {
             for offset in (0..=highest_address).step_by(2 * 1024 * 1024) {
                 let vaddr = VirtualAddress(offset + PHYSICAL_MEMORY_START.0);
                 let paddr = PhysicalAddress(offset);
+
                 page_table.map_raw(&mut self.frame_allocator,
                                    &BOOT_PHYSICAL_MEMORY,
                                    vaddr, paddr, PageType::Page2M,
                                    MemoryRegionFlags::READ |
                                    MemoryRegionFlags::WRITE)
                     .expect("Failed to map");
+
             }
 
             /*
@@ -348,7 +344,7 @@ impl MemoryManager {
         // TODO(patrik): Free the old page table
 
         unsafe {
-            arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
+            // arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
         }
     }
 
@@ -552,12 +548,12 @@ impl MemoryManager {
 
 static MM: Mutex<Option<MemoryManager>> = Mutex::new(None);
 
-pub fn initialize(multiboot_structure: PhysicalAddress) {
+pub fn initialize(boot_info: &BootInfo) {
     {
         let mut lock = MM.lock();
         assert!(lock.is_none(), "MM: Memory Manager already initialized");
 
-        *lock = Some(MemoryManager::new(multiboot_structure));
+        *lock = Some(MemoryManager::new(boot_info));
     }
 }
 

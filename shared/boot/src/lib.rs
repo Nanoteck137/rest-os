@@ -15,9 +15,13 @@ impl BootPhysicalAddress {
     pub fn new(addr: u64) -> Self {
         Self(addr)
     }
+
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(u64)]
 pub enum BootMemoryMapType {
     Available,
@@ -58,16 +62,28 @@ impl BootMemoryMapEntry {
             typ
         }
     }
+
+    pub fn addr(&self) -> BootPhysicalAddress {
+        self.addr
+    }
+
+    pub fn length(&self) -> BootSize {
+        self.length
+    }
+
+    pub fn typ(&self) -> BootMemoryMapType {
+        self.typ
+    }
 }
 
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct BootInfo {
-    /// Starting address of the heap the kernel can use
-    heap_addr: BootPhysicalAddress,
+    /// The start of the kernel
+    kernel_start: BootPhysicalAddress,
 
-    /// The length of the heap region
-    heap_length: BootSize,
+    /// The next byte over the kernel end
+    kernel_end: BootPhysicalAddress,
 
     /// Starting address of the initrd
     initrd_addr: BootPhysicalAddress,
@@ -83,13 +99,15 @@ pub struct BootInfo {
 }
 
 impl BootInfo {
-    pub fn new(heap_addr: BootPhysicalAddress, heap_length: BootSize,
-               initrd_addr: BootPhysicalAddress, initrd_length: BootSize)
+    pub fn new(kernel_start: BootPhysicalAddress,
+               kernel_end: BootPhysicalAddress,
+               initrd_addr: BootPhysicalAddress,
+               initrd_length: BootSize)
         -> Self
     {
         Self {
-            heap_addr,
-            heap_length,
+            kernel_start,
+            kernel_end,
 
             initrd_addr,
             initrd_length,
@@ -97,6 +115,14 @@ impl BootInfo {
             memory_map: [BootMemoryMapEntry::default(); MAX_MEMORY_MAP_ENTRIES],
             num_memory_map_entries: 0,
         }
+    }
+
+    pub fn kernel_start(&self) -> BootPhysicalAddress {
+        self.kernel_start
+    }
+
+    pub fn kernel_end(&self) -> BootPhysicalAddress {
+        self.kernel_end
     }
 
     pub fn add_memory_map_entry(&mut self, entry: BootMemoryMapEntry)
@@ -110,5 +136,9 @@ impl BootInfo {
         self.num_memory_map_entries += 1;
 
         Some(())
+    }
+
+    pub fn memory_map(&self) -> &[BootMemoryMapEntry] {
+        &self.memory_map[..self.num_memory_map_entries]
     }
 }
