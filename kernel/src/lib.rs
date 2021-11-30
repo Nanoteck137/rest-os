@@ -62,6 +62,7 @@ macro_rules! verify_interrupts_disabled {
 #[macro_use] extern crate bitflags;
 
 extern crate elf;
+extern crate boot;
 
 /// Poll in all the modules that the kernel has
 #[macro_use] mod print;
@@ -97,6 +98,7 @@ use process::{ Process };
 use scheduler::Scheduler;
 use cpio::{ CPIO, CPIOKind };
 use elf::{ Elf, ProgramHeaderType };
+use boot::BootInfo;
 
 use arch::x86_64::{ PageTable, PageType };
 
@@ -301,18 +303,18 @@ fn kernel_test_thread() {
 }
 
 #[no_mangle]
-pub extern fn kernel_init(multiboot_addr: usize) -> ! {
+pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     arch::early_initialize();
 
-    // Clear the display
-    let ptr = 0xb8000 as *mut u16;
-    unsafe {
-        for i in 0..25*80 {
-            *ptr.offset(i) = 0x0000;
-        }
-    }
+    let boot_info =
+        unsafe { &*(boot_info_addr as *const u64 as *const BootInfo) };
 
     println!("{}", banner!());
+
+    println!("Kernel Boot: {:?}", boot_info);
+
+    let multiboot_addr = 0;
+    loop {}
 
     // Initialize the kernel heap
     initialize_heap();

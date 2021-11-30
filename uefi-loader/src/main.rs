@@ -15,11 +15,14 @@
 
 #[macro_use] extern crate bitflags;
 extern crate elf;
+extern crate boot;
 
 use core::panic::PanicInfo;
 
-use efi::{ EfiHandle, EfiSystemTablePtr };
+use efi::{ EfiHandle, EfiSystemTablePtr, EfiMemoryType };
 use elf::{ Elf, ProgramHeaderType };
+use boot::{ BootInfo, BootPhysicalAddress, BootMemoryMapEntry };
+use boot::BootMemoryMapType;
 
 mod efi;
 
@@ -256,13 +259,18 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     // TODO(patrik): Code cleanup
     // TODO(patrik): Create some kind of structure to pass in to the kernel
     //   - Starting Heap
+    //     - Just find a region of 'ConventionalMemory' to use for the heap
     //   - Memory map
     //   - ACPI Tables
+    //   - Initrd
+    //
     //   - Kernel command line, Where from to retrive the command line?
     //     - Read from a file?
     //     - Embed inside the bootloader or kernel executable?
-    //   - Initrd
     //   - Early identity map of physical memory
+    //     - We know that all of physical memory should be mapped when UEFI
+    //       boots, so the kernel could use that temporary mapping before the
+    //       kernel creates it's own page table
     //   - Framebuffer
 
     // Clear the screen
@@ -365,6 +373,13 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     };
     */
 
+    let heap_addr = BootPhysicalAddress::new(0);
+    let heap_length = 0;
+    let initrd_addr = BootPhysicalAddress::new(0);
+    let initrd_length = 0;
+    let mut boot_info = BootInfo::new(heap_addr, heap_length,
+                                      initrd_addr, initrd_length);
+
     // Loop through the memory map and print out the infomation
     for offset in (0..memory_map_size).step_by(descriptor_size) {
         // Parse the descriptor
@@ -389,11 +404,48 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
         print!("{:?}", descriptor.typ());
         println!();
+
+        let typ = match descriptor.typ() {
+            EfiMemoryType::ReservedMemoryType |
+            EfiMemoryType::RuntimeServicesCode |
+            EfiMemoryType::RuntimeServicesData |
+            EfiMemoryType::UnusableMemory |
+            EfiMemoryType::MemoryMappedIO |
+            EfiMemoryType::MemoryMappedIOPortSpace |
+            EfiMemoryType::PalCode |
+            EfiMemoryType::PersistentMemory |
+            EfiMemoryType::UnacceptedMemoryType => BootMemoryMapType::Reserved,
+
+            EfiMemoryType::LoaderCode |
+            EfiMemoryType::LoaderData |
+            EfiMemoryType::BootServicesCode |
+            EfiMemoryType::BootServicesData |
+            EfiMemoryType::ConventionalMemory => BootMemoryMapType::Available,
+
+            EfiMemoryType::ACPIReclaimMemory |
+            EfiMemoryType::ACPIMemoryNVS => BootMemoryMapType::Acpi,
+        };
+
+        let addr = BootPhysicalAddress::new(start);
+        let entry = BootMemoryMapEntry::new(addr, length, typ);
+        boot_info.add_memory_map_entry(entry);
+    }
+
+    println!("Boot Info: {:#x?}", boot_info);
+
+    // TODO(patirk): Static assert
+    assert!(core::mem::size_of::<BootInfo>() <= 4096,
+            "The BootInfo structure needs to fit inside a page (4096)");
+
+    let boot_info_addr = frame_alloc.alloc_zeroed();
+    let boot_info_ptr = boot_info_addr as *mut BootInfo;
+    unsafe {
+        core::ptr::write(boot_info_ptr, boot_info);
     }
 
     // Create a type for the kernel entry point
     type KernelEntry =
-        unsafe extern "sysv64" fn(multiboot_structure: u64) -> !;
+        unsafe extern "sysv64" fn(boot_info_addr: u64) -> !;
 
     // Get the address for the entry point inside the kernel executable
     let entry_point = elf.entry();
@@ -403,7 +455,7 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
     // Call into the kernel
     unsafe {
-        (entry)(0);
+        (entry)(boot_info_addr as u64);
     }
 }
 
