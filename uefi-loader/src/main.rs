@@ -329,6 +329,7 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let kernel_end = kernel_start + total_page_count * 4096;
 
     let mut current_offset = 0;
+    let mut end_addr = 0;
 
     // Loop through all the program headers
     for program_header in elf.program_headers() {
@@ -355,6 +356,9 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         // Allocate the necessary pages for the program header
         let addr = kernel_start + current_offset;
         current_offset += page_count * 4096;
+
+        let end = program_header.vaddr() as usize + page_count * 4096;
+        end_addr = core::cmp::max(end, end_addr);
 
         // Create a pointer from the address we got from `efi::allocate_pages`
         let ptr = addr as *mut u8;
@@ -395,19 +399,23 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
     let stack_start = kernel_start + current_offset;
     let stack_end = stack_start + (stack_size * 4096);
+    println!("End: {:#x}", end_addr);
+    println!("Stack Start: {:#x}", stack_start);
 
-    /*
+    let kernel_stack_end = end_addr + stack_size * 4096;
+    println!("kernel Stack: {:#x}", kernel_stack_end);
+
     for index in (0..(stack_size * 4096)).step_by(4096) {
-        let vaddr = ;
-        let paddr = ;
+        let vaddr = end_addr + index;
+        let paddr = stack_start + index;
+
         unsafe {
-            map_page_4k(&mut frame_alloc, cr3, vaddr, paddr);
+            map_page_4k(&mut frame_alloc, cr3, vaddr as u64, paddr as u64);
         }
     }
-    */
 
     // Create a buffer for the efi memory map
-    let mut buffer = [0; 4096];
+    let mut buffer = [0; 2 * 4096];
 
     // Get the memory map
     let (memory_map_size, map_key, descriptor_size) =
@@ -490,8 +498,6 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         core::ptr::write(boot_info_ptr, boot_info);
     }
 
-    println!("Test: {:#x}", 0xffffffff80000000 + current_offset + 1 * 1024 * 1024);
-
     let (memory_map_size, descriptor_size)  = loop {
         let (memory_map_size, map_key, descriptor_size) =
             efi::memory_map(&mut buffer)
@@ -522,10 +528,9 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         asm!("
              /* {1} */
              mov rdi, {0}
-             mov rsp, 0
-             mov rbp, 0
+             mov rsp, {1}
              jmp {2}", in(reg) boot_info_addr,
-                       in(reg) (0xffffffff80000000 + current_offset + 1 * 1024),
+                       in(reg) kernel_stack_end,
                        in(reg) entry_point);
     }
     loop {}

@@ -316,6 +316,7 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
         asm!("mov {}, rsp", out(reg) stack);
     }
     println!("Stack: {:#x}", stack);
+    println!("Kernel End: {:?}", get_kernel_end());
 
     let boot_info =
         unsafe { &*(boot_info_addr as *const u64 as *const BootInfo) };
@@ -333,6 +334,25 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     processor::init(0);
 
     time::initialize();
+
+    let serial_device = SerialDevice {
+        ioctl_count: 0,
+    };
+
+    let dummy_device = DummyDevice {};
+
+    /*
+    let mut register_device = |name, device| {
+        devices.insert(name, RwLock::new(device));
+    };
+    */
+
+    register_device(String::from("serial_device_00"), Box::new(serial_device));
+    register_device(String::from("dummy_device"), Box::new(dummy_device));
+
+    print::switch_early_print();
+    print::console_init();
+    print::flush_early_print_buffer();
 
     let multiboot_addr = 0;
     loop {}
@@ -356,25 +376,6 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     }
     */
 
-
-    let serial_device = SerialDevice {
-        ioctl_count: 0,
-    };
-
-    let dummy_device = DummyDevice {};
-
-    /*
-    let mut register_device = |name, device| {
-        devices.insert(name, RwLock::new(device));
-    };
-    */
-
-    register_device(String::from("serial_device_00"), Box::new(serial_device));
-    register_device(String::from("dummy_device"), Box::new(dummy_device));
-
-    print::switch_early_print();
-    print::console_init();
-    print::flush_early_print_buffer();
 
     acpi::initialize(&BOOT_PHYSICAL_MEMORY, &multiboot);
     arch::initialize();

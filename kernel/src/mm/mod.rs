@@ -301,15 +301,17 @@ impl MemoryManager {
             let kernel_end = self.boot_info.kernel_end().raw();
             println!("Kernel Bounds: {:#x} - {:#x}", kernel_start, kernel_end);
 
-            for addr in (kernel_start..kernel_end)
-                .step_by(2 * 1024 * 1024)
+            let kernel_length = kernel_end - kernel_start;
+            for offset in (0..kernel_length)
+                .step_by(4096)
             {
-                let addr = addr as usize;
-                let vaddr = VirtualAddress(addr + KERNEL_TEXT_START.0);
-                let paddr = PhysicalAddress(addr);
+                let offset = offset as usize;
+                let vaddr = VirtualAddress(KERNEL_TEXT_START.0 + offset);
+                let paddr = PhysicalAddress(kernel_start as usize + offset);
+
                 page_table.map_raw(&mut self.frame_allocator,
                                    &BOOT_PHYSICAL_MEMORY,
-                                   vaddr, paddr, PageType::Page2M,
+                                   vaddr, paddr, PageType::Page4K,
                                    MemoryRegionFlags::READ |
                                    MemoryRegionFlags::WRITE |
                                    MemoryRegionFlags::EXECUTE)
@@ -344,7 +346,7 @@ impl MemoryManager {
         // TODO(patrik): Free the old page table
 
         unsafe {
-            // arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
+            arch::x86_64::write_cr3(self.reference_page_table.addr().0 as u64);
         }
     }
 
