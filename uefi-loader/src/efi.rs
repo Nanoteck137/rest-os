@@ -6,8 +6,13 @@
 
 use core::sync::atomic::{ Ordering, AtomicPtr };
 
-/// Constant for the page size
+/// The standered size of a page (4096 bytes)
 const PAGE_SIZE: usize = 0x1000;
+
+/// The GUID of the ACPI configuration table
+const ACPI_20_TABLE_GUID: EfiGuid =
+    EfiGuid::new(0x8868e871, 0xe4f1, 0x11d3,
+                 [0xbc,0x22,0x00,0x80,0xc7,0x3c,0x88,0x81]);
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -18,16 +23,56 @@ static SYSTEM_TABLE: AtomicPtr<EfiSystemTable> =
 /// Errors defined by the EFI module
 #[derive(Debug)]
 pub enum Error {
+    /// No system table has been registerd
     SystemTableNotRegistered,
+
+    /// Failed to clear the screen
     ClearScreen(EfiStatus),
+
+    /// Failed to output string to the screen
     OutputString(EfiStatus),
+
+    /// Failed to allocate pages
     AllocatePages(EfiStatus),
+
+    /// Failed to retrive the memory map
     MemoryMap(EfiStatus),
+
+    /// Failed to exit boot services
     ExitBootServices(EfiStatus),
 
+    /// The buffer was too small
     ByteBufferTooSmall,
+
+    /// Unknown memory type
     UnknownMemoryType(u64),
+
+    /// Unknown memory attribute
     UnknownMemoryAttribute(u64),
+
+    /// Failed to find the ACPI table inside the EFI configuration tables
+    UnableToFindACPITable,
+}
+
+/// Efi GUID 128-bit ID
+#[repr(C)]
+#[derive(Copy, Clone, PartialEq, Debug)]
+struct EfiGuid {
+    part1: u32,
+    part2: u16,
+    part3: u16,
+    part4: [u8; 8],
+}
+
+impl EfiGuid {
+    const fn new(part1: u32, part2: u16, part3: u16, part4: [u8; 8]) -> Self {
+        Self {
+            part1,
+            part2,
+            part3,
+            part4
+        }
+    }
 }
 
 /// Types of allocations we can do inside for example
@@ -519,7 +564,7 @@ impl EfiSystemTablePtr {
 /// EFI Table header
 #[repr(C)]
 struct EfiTableHeader {
-    ///A 64-bit signature that identifies the type of table that follows
+    /// A 64-bit signature that identifies the type of table that follows
     signature: u64,
 
     /// The revision of the EFI Specification to which this table conforms
@@ -624,6 +669,18 @@ struct EfiSimpleTextOutputProtocol {
     mode: usize,
 }
 
+/// Contains a set of GUID/pointer pairs comprised of the ConfigurationTable
+/// field in the EFI System Table
+#[repr(C)]
+struct EfiConfigurationTable {
+    /// The 128-bit GUID value that uniquely identifies the system
+    /// configuration table.
+    vendor_guid: EfiGuid,
+
+    /// A pointer to the table associated with VendorGuid
+    vendor_table: *mut u8,
+}
+
 /// EFI System table
 #[repr(C)]
 struct EfiSystemTable {
@@ -645,7 +702,7 @@ struct EfiSystemTable {
     boot_services: *mut EfiBootServices,
 
     number_of_table_entries: usize,
-    configuration_table: usize
+    configuration_table: *const EfiConfigurationTable,
 }
 
 /// Clears the screen of the EFI stdout
@@ -857,6 +914,59 @@ pub fn memory_map(buffer: &mut [u8]) -> Result<(usize, usize, usize)> {
     }
 
     Ok((memory_map_size, map_key, descriptor_size))
+}
+
+/// Find and return the address of the ACPI RSDP
+///
+/// # Returns
+///
+/// * `Ok(())` - If we succeeded to find a ACPI RSDP address
+/// * `Err` - If we failed to find a ACPI RSDP address
+///   - [`Error::SystemTableNotRegistered`] - If their is not a system table currently registered
+///   - [`Error::UnableToFindACPITable`] - If we were unable to find the acpi rsdp
+pub fn find_acpi_table() -> Result<usize> {
+    // Get access to the system table
+    let system_table = SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it's registered
+    if system_table.is_null() { return Err(Error::SystemTableNotRegistered) }
+
+    unsafe {
+        // The number of configuration tables from system
+        let num_tables = (*system_table).number_of_table_entries;
+
+        let mut rsdp = None;
+
+        // Loop through all the configuration tables to find the ACPI table
+        for i in 0..num_tables {
+            // Get the pointer to the table
+            let table_ptr = (*system_table).configuration_table.add(i);
+
+            // The guid of the current table
+            let table_guid = (*table_ptr).vendor_guid;
+            // If the guid matches the ACPI GUID then check if that is a
+            // valid RSDP signature
+            if table_guid == ACPI_20_TABLE_GUID {
+                // Get the header signature
+                let header_sig = core::ptr::read((*table_ptr).vendor_table as *const [u8; 8]);
+                // Check the signature
+                if &header_sig == b"RSD PTR " {
+                    // We found the right table
+                    rsdp = Some((*table_ptr).vendor_table);
+                    break;
+                }
+            }
+        }
+
+        // Check if we found the ACPI RSDP
+        return if let Some(rsdp) = rsdp {
+            // Return the address
+            Ok(rsdp as usize)
+        } else {
+            // Return a error if we did not find the RSDP
+            Err(Error::UnableToFindACPITable)
+        };
+    }
 }
 
 /// Exit the boot services

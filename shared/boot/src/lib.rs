@@ -19,6 +19,10 @@ impl BootPhysicalAddress {
     pub fn raw(&self) -> u64 {
         self.0
     }
+
+    pub fn is_null(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -96,13 +100,17 @@ pub struct BootInfo {
 
     /// Number of entries used inside the `memory_map`
     num_memory_map_entries: usize,
+
+    /// The address of the ACPI RSDP
+    acpi_table: BootPhysicalAddress,
 }
 
 impl BootInfo {
     pub fn new(kernel_start: BootPhysicalAddress,
                kernel_end: BootPhysicalAddress,
                initrd_addr: BootPhysicalAddress,
-               initrd_length: BootSize)
+               initrd_length: BootSize,
+               acpi_table: BootPhysicalAddress)
         -> Self
     {
         Self {
@@ -114,6 +122,8 @@ impl BootInfo {
 
             memory_map: [BootMemoryMapEntry::default(); MAX_MEMORY_MAP_ENTRIES],
             num_memory_map_entries: 0,
+
+            acpi_table
         }
     }
 
@@ -123,6 +133,14 @@ impl BootInfo {
 
     pub fn kernel_end(&self) -> BootPhysicalAddress {
         self.kernel_end
+    }
+
+    pub fn initrd_addr(&self) -> BootPhysicalAddress {
+        self.initrd_addr
+    }
+
+    pub fn initrd_length(&self) -> BootSize {
+        self.initrd_length
     }
 
     pub fn add_memory_map_entry(&mut self, entry: BootMemoryMapEntry)
@@ -140,5 +158,9 @@ impl BootInfo {
 
     pub fn memory_map(&self) -> &[BootMemoryMapEntry] {
         &self.memory_map[..self.num_memory_map_entries]
+    }
+
+    pub fn acpi_table(&self) -> BootPhysicalAddress {
+        self.acpi_table
     }
 }

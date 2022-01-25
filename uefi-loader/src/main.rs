@@ -105,6 +105,9 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 /// The included kernel executable
 static KERNEL_EXECUTABLE: &'static [u8] =
     include_bytes!("../../target/kernel.elf");
+/// The included kernel initrd
+static KERNEL_INITRD: &'static [u8] =
+    include_bytes!("../../target/initrd.cpio");
 
 /// Simple frame allocator, used by the page mapping code to allocate pages
 /// for the page table
@@ -399,11 +402,8 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
     let stack_start = kernel_start + current_offset;
     let stack_end = stack_start + (stack_size * 4096);
-    println!("End: {:#x}", end_addr);
-    println!("Stack Start: {:#x}", stack_start);
 
     let kernel_stack_end = end_addr + stack_size * 4096;
-    println!("kernel Stack: {:#x}", kernel_stack_end);
 
     for index in (0..(stack_size * 4096)).step_by(4096) {
         let vaddr = end_addr + index;
@@ -422,18 +422,18 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         efi::memory_map(&mut buffer)
             .expect("Failed to retrive the memory map");
 
-    // NOTE(patirk): This will exit boot services, but we don't want to do it
-    // yet because we lose the ability to print stuff
-
-    /*
-    */
+    // Get the ACPI RSDP
+    let acpi_table = efi::find_acpi_table()
+        .expect("Failed to find the ACPI table");
+    let acpi_table = BootPhysicalAddress::new(acpi_table as u64);
 
     let kernel_start = BootPhysicalAddress::new(kernel_start as u64);
     let kernel_end = BootPhysicalAddress::new(kernel_end as u64);
-    let initrd_addr = BootPhysicalAddress::new(0);
-    let initrd_length = 0;
+    let initrd_addr = BootPhysicalAddress::new(KERNEL_INITRD.as_ptr() as u64);
+    let initrd_length = KERNEL_INITRD.len() as u64;
     let mut boot_info = BootInfo::new(kernel_start, kernel_end,
-                                      initrd_addr, initrd_length);
+                                      initrd_addr, initrd_length,
+                                      acpi_table);
 
     // Loop through the memory map and print out the infomation
     for offset in (0..memory_map_size).step_by(descriptor_size) {
@@ -485,8 +485,6 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         let entry = BootMemoryMapEntry::new(addr, length, typ);
         boot_info.add_memory_map_entry(entry);
     }
-
-    // println!("Boot Info: {:#x?}", boot_info);
 
     // TODO(patirk): Static assert
     assert!(core::mem::size_of::<BootInfo>() <= 4096,

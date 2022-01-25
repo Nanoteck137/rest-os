@@ -300,7 +300,7 @@ pub fn read_initrd_file(path: String) -> Option<(*const u8, usize)> {
 
 fn kernel_test_thread() {
     loop {
-        // println!("Kernel Test thread");
+        println!("Kernel Test thread");
     }
 }
 
@@ -354,6 +354,75 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     print::console_init();
     print::flush_early_print_buffer();
 
+    let boot_info_addr_virt = KERNEL_PHYSICAL_MEMORY.translate(PhysicalAddress(boot_info_addr.try_into().unwrap()))
+        .expect("Failed to translate boot info address");
+
+    let boot_info =
+        unsafe { &*(boot_info_addr_virt.0 as *const u64 as *const BootInfo) };
+
+    acpi::initialize(&KERNEL_PHYSICAL_MEMORY, &boot_info);
+    arch::initialize();
+
+    acpi::debug_dump();
+
+    time::sleep(2 * 1000 * 1000);
+
+    unsafe {
+        core!().enable_interrupts();
+    }
+
+    core!().without_interrupts(|| {
+        println!("Interrupts: {}", core!().is_interrupts_enabled());
+    });
+
+    {
+        let initrd_addr = boot_info.initrd_addr().raw();
+        let initrd_len: usize = boot_info.initrd_length().try_into().unwrap();
+
+        let initrd_paddr = PhysicalAddress(initrd_addr.try_into().unwrap());
+        let data = unsafe { KERNEL_PHYSICAL_MEMORY.slice(initrd_paddr, initrd_len) };
+        let initrd_vaddr = KERNEL_PHYSICAL_MEMORY.translate(initrd_paddr)
+            .expect("Failed to translate initrd address");
+
+        if u16::from_le_bytes(data[0..2].try_into().unwrap()) == 0o070707 {
+            // Binary cpio
+            println!("Binary cpio");
+
+            let cpio = CPIO::new(initrd_vaddr, initrd_len, CPIOKind::Binary);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070707" {
+            println!("Odc cpio");
+
+            let cpio = CPIO::new(initrd_vaddr, initrd_len, CPIOKind::Odc);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070701" {
+            println!("Newc cpio");
+
+            let cpio = CPIO::new(initrd_vaddr, initrd_len, CPIOKind::Newc);
+            *CPIO.lock() = Some(cpio);
+        } else if &data[0..6] == b"070702" {
+            println!("Newc CRC cpio");
+
+            let cpio = CPIO::new(initrd_vaddr, initrd_len, CPIOKind::Crc);
+            *CPIO.lock() = Some(cpio);
+        }
+    }
+
+    let init_process = Process::create_kernel("Kernel Init".to_owned(),
+                                              kernel_init_thread);
+
+    Scheduler::add_process(init_process);
+
+    let test_process = Process::create_kernel("Test Process".to_owned(),
+                                              kernel_test_thread);
+    Scheduler::add_process(test_process);
+
+    Scheduler::debug_dump();
+
+    unsafe {
+        core!().scheduler().start();
+    };
+
     let multiboot_addr = 0;
     loop {}
 
@@ -377,20 +446,6 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     */
 
 
-    acpi::initialize(&BOOT_PHYSICAL_MEMORY, &multiboot);
-    arch::initialize();
-
-    acpi::debug_dump();
-
-    time::sleep(2 * 1000 * 1000);
-
-    unsafe {
-        core!().enable_interrupts();
-    }
-
-    core!().without_interrupts(|| {
-        println!("Interrupts: {}", core!().is_interrupts_enabled());
-    });
 
     multiboot.modules(|m| {
         println!("Module");
