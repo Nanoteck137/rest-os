@@ -196,53 +196,6 @@ fn display_memory_map(boot_info: &BootInfo) {
     println!("Available memory: {}MiB", availble_memory / 1024 / 1024);
 }
 
-fn _display_multiboot_tags(multiboot: &Multiboot) {
-    for tag in multiboot.tags() {
-        match tag {
-            Tag::CommandLine(s) => println!("Command Line: {}", s),
-            Tag::BootloaderName(s) => println!("Bootloader Name: {}", s),
-            Tag::Module(m) => println!("Module: {:#x?}", m),
-
-            Tag::BasicMemInfo(lower, upper) =>
-                println!("Basic Memory Info - Lower: {} Upper: {}",
-                         lower, upper),
-
-            Tag::BootDev(boot_dev) =>
-                println!("Boot Device: {:#x?}", boot_dev),
-
-            Tag::MemoryMap(_memory_map) => {
-                println!("Memory Map Tag");
-            }
-
-            Tag::Framebuffer(framebuffer) =>
-                println!("{:#?}", framebuffer),
-
-            Tag::ElfSections(elf_sections) => {
-                let table = elf_sections.string_table(&BOOT_PHYSICAL_MEMORY)
-                    .expect("Failed to find the string table");
-
-                for section in elf_sections.iter() {
-                    println!("{} Section: {:#x?}",
-                             table.string(section.name_index()).unwrap(),
-                             section);
-                }
-            }
-
-            Tag::Acpi1(addr) =>
-                println!("ACPI 1.0: {:?}", addr),
-
-            Tag::Acpi2(addr, length) =>
-                println!("ACPI 2.0: {:?} - {}", addr, length),
-
-            Tag::LoadBaseAddr(addr) =>
-                println!("Load Base Addr: {:#x}", addr),
-
-            Tag::Unknown(index) =>
-                eprintln!("Unknown index: {}", index),
-        }
-    }
-}
-
 #[alloc_error_handler]
 fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     panic!("memory allocation of {} bytes failed", layout.size())
@@ -253,13 +206,8 @@ static ALLOCATOR: Locked<Allocator> = Locked::new(Allocator::new());
 
 // Linker variables
 extern {
-    static _end: u32;
     static _heap_start: u32;
     static _heap_end: u32;
-}
-
-fn get_kernel_end() -> VirtualAddress {
-    unsafe { VirtualAddress(&_end as *const u32 as usize) }
 }
 
 fn heap() -> (VirtualAddress, usize) {
@@ -311,28 +259,24 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     }
     arch::early_initialize();
 
-    let stack: u64;
-    unsafe {
-        asm!("mov {}, rsp", out(reg) stack);
-    }
-    println!("Stack: {:#x}", stack);
-    println!("Kernel End: {:?}", get_kernel_end());
-
     let boot_info =
         unsafe { &*(boot_info_addr as *const u64 as *const BootInfo) };
 
     println!("{}", banner!());
 
-    // println!("Kernel Boot: {:?}", boot_info);
-
     // Initialize the kernel heap
     initialize_heap();
 
+    // Display the memory map from the bootloader
     display_memory_map(&boot_info);
 
+    // Initialize the memory manager
     mm::initialize(&boot_info);
+
+    // Initialize the BSP
     processor::init(0);
 
+    // Initialize the time
     time::initialize();
 
     let serial_device = SerialDevice {
@@ -350,23 +294,33 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
     register_device(String::from("serial_device_00"), Box::new(serial_device));
     register_device(String::from("dummy_device"), Box::new(dummy_device));
 
+    // Switch from the print buffer
     print::switch_early_print();
     print::console_init();
     print::flush_early_print_buffer();
 
-    let boot_info_addr_virt = KERNEL_PHYSICAL_MEMORY.translate(PhysicalAddress(boot_info_addr.try_into().unwrap()))
-        .expect("Failed to translate boot info address");
+    // Get a new reference to the boot info because the memory address has
+    // moved when we initialized the memory manager
+    let boot_info_addr = PhysicalAddress(boot_info_addr.try_into().unwrap());
+    let boot_info_addr_virt =
+        KERNEL_PHYSICAL_MEMORY.translate(boot_info_addr)
+            .expect("Failed to translate boot info address");
 
     let boot_info =
         unsafe { &*(boot_info_addr_virt.0 as *const u64 as *const BootInfo) };
 
+    // Initialize ACPI
     acpi::initialize(&KERNEL_PHYSICAL_MEMORY, &boot_info);
+
+    // Initialize the arch
     arch::initialize();
 
+    // Dump all the ACPI tables
     acpi::debug_dump();
 
     time::sleep(2 * 1000 * 1000);
 
+    // Enable interrupts
     unsafe {
         core!().enable_interrupts();
     }
@@ -407,76 +361,6 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
             *CPIO.lock() = Some(cpio);
         }
     }
-
-    let init_process = Process::create_kernel("Kernel Init".to_owned(),
-                                              kernel_init_thread);
-
-    Scheduler::add_process(init_process);
-
-    let test_process = Process::create_kernel("Test Process".to_owned(),
-                                              kernel_test_thread);
-    Scheduler::add_process(test_process);
-
-    Scheduler::debug_dump();
-
-    unsafe {
-        core!().scheduler().start();
-    };
-
-    let multiboot_addr = 0;
-    loop {}
-
-
-    // Get access to the multiboot structure
-    let multiboot = unsafe {
-        Multiboot::from_addr(&BOOT_PHYSICAL_MEMORY,
-                             PhysicalAddress(multiboot_addr))
-    };
-
-
-    // _display_multiboot_tags(&multiboot);
-
-    // Display the memory map from the multiboot structure
-
-    /*
-    let cmd_line = multiboot.find_command_line();
-    if let Some(s) = cmd_line {
-        println!("Kernel Command Line: {}", s);
-    }
-    */
-
-
-
-    multiboot.modules(|m| {
-        println!("Module");
-        let data = unsafe { m.data(&KERNEL_PHYSICAL_MEMORY) };
-
-        let addr = VirtualAddress(data.as_ptr() as usize);
-        let size = data.len();
-
-        if u16::from_le_bytes(data[0..2].try_into().unwrap()) == 0o070707 {
-            // Binary cpio
-            println!("Binary cpio");
-
-            let cpio = CPIO::new(addr, size, CPIOKind::Binary);
-            *CPIO.lock() = Some(cpio);
-        } else if &data[0..6] == b"070707" {
-            println!("Odc cpio");
-
-            let cpio = CPIO::new(addr, size, CPIOKind::Odc);
-            *CPIO.lock() = Some(cpio);
-        } else if &data[0..6] == b"070701" {
-            println!("Newc cpio");
-
-            let cpio = CPIO::new(addr, size, CPIOKind::Newc);
-            *CPIO.lock() = Some(cpio);
-        } else if &data[0..6] == b"070702" {
-            println!("Newc CRC cpio");
-
-            let cpio = CPIO::new(addr, size, CPIOKind::Crc);
-            *CPIO.lock() = Some(cpio);
-        }
-    });
 
     use alloc::borrow::ToOwned;
 
