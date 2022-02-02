@@ -118,10 +118,10 @@ pub fn _print_fmt(args: core::fmt::Arguments) {
 }
 
 /// The included kernel executable
-static KERNEL_EXECUTABLE: &'static [u8] =
+static KERNEL_EXECUTABLE: &[u8] =
     include_bytes!("../../target/kernel.elf");
 /// The included kernel initrd
-static KERNEL_INITRD: &'static [u8] =
+static KERNEL_INITRD: &[u8] =
     include_bytes!("../../target/initrd.cpio");
 
 /// Simple frame allocator, used by the page mapping code to allocate pages
@@ -177,14 +177,6 @@ impl FrameAlloc {
 
         result
     }
-}
-
-/// Returns the cr3 register for this CPU core
-unsafe fn read_cr3() -> u64 {
-    let cr3: u64;
-    asm!("mov {}, cr3", out(reg) cr3);
-
-    cr3
 }
 
 /// Maps a 4K aligned physical address to a 4K aligned virtual address
@@ -506,7 +498,7 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let kernel_page_table = kernel_page_table as u64;
 
     // Parse the kernel executable
-    let elf = Elf::parse(&KERNEL_EXECUTABLE)
+    let elf = Elf::parse(KERNEL_EXECUTABLE)
         .expect("Failed to parse kernel executable");
 
     let total_page_count = get_page_count(&elf);
@@ -522,8 +514,6 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let kernel_stack_end = map_in_stack(end_paddr, end_vaddr,
                                         &mut frame_alloc, kernel_page_table);
 
-    println!("Kernel Stack: {:#x?}", kernel_stack_end);
-
     identity_map(&mut frame_alloc, kernel_page_table);
 
     let trampoline_entry = prepare_trampoline(&mut frame_alloc,
@@ -533,7 +523,7 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let mut buffer = [0; 2 * 4096];
 
     // Get the memory map
-    let (memory_map_size, map_key, descriptor_size) =
+    let (memory_map_size, _map_key, descriptor_size) =
         efi::memory_map(&mut buffer)
             .expect("Failed to retrive the memory map");
 
@@ -564,11 +554,11 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
         print!("[0x{:016x}-0x{:016x}] ", start, end);
 
-        if length >= 1 * 1024 * 1024 * 1024 {
+        if length >= 1024 * 1024 * 1024 {
             print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
-        } else if length >= 1 * 1024 * 1024 {
+        } else if length >= 1024 * 1024 {
             print!("{:>4} MiB ", length / 1024 / 1024);
-        } else if length >= 1 * 1024 {
+        } else if length >= 1024 {
             print!("{:>4} KiB ", length / 1024);
         } else {
             print!("{:>4} B   ", length);
@@ -603,28 +593,6 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         boot_info.add_memory_map_entry(entry);
     }
 
-    for entry in boot_info.memory_map() {
-        let start = entry.addr().raw();
-        let length = entry.length();
-        let end = start + length - 1;
-
-        print!("[0x{:016x}-0x{:016x}] ", start, end);
-
-        if length >= 1 * 1024 * 1024 * 1024 {
-            print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
-        } else if length >= 1 * 1024 * 1024 {
-            print!("{:>4} MiB ", length / 1024 / 1024);
-        } else if length >= 1 * 1024 {
-            print!("{:>4} KiB ", length / 1024);
-        } else {
-            print!("{:>4} B   ", length);
-        }
-
-        print!("{:?}", entry.typ());
-
-        println!();
-    }
-
     // TODO(patirk): Static assert
     assert!(core::mem::size_of::<BootInfo>() <= 4096,
             "The BootInfo structure needs to fit inside a page (4096)");
@@ -638,14 +606,14 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
                     boot_info_addr as u64, boot_info_addr as u64);
     }
 
-    let (memory_map_size, descriptor_size) = loop {
-        let (memory_map_size, map_key, descriptor_size) =
+    loop {
+        let (_memory_map_size, map_key, _descriptor_size) =
             efi::memory_map(&mut buffer)
                 .expect("Failed to retrive the memory map");
 
         match efi::exit_boot_services(image_handle, map_key) {
-            Ok(()) => break (memory_map_size, descriptor_size),
-            Err(status) => continue
+            Ok(()) => break,
+            Err(_status) => continue
         }
     };
 
@@ -668,7 +636,8 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
              in(reg) kernel_stack_end,
              in(reg) trampoline_entry);
     }
-    loop {}
+
+    panic!("This should not happen");
 }
 
 /// The panic handler for this application

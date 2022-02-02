@@ -1,6 +1,7 @@
 //! Module to parse and retrive infomation from a Elf file
 
 #![no_std]
+#![allow(dead_code)]
 
 #[macro_use]
 extern crate bitflags;

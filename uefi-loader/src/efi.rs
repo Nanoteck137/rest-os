@@ -2,6 +2,8 @@
 //!
 //! Spec: <https://uefi.org/sites/default/files/resources/UEFI_Spec_2_9_2021_03_18.pdf>
 
+#![allow(dead_code)]
+
 // TODO(patrik):
 
 use core::sync::atomic::{ Ordering, AtomicPtr };
@@ -84,16 +86,16 @@ enum EfiAllocateType {
     /// Allocation requests of Type AllocateAnyPages allocate any available
     /// range of pages that satisfies the request. On input, the address
     /// pointed to by Memory is ignored.
-    AllocateAnyPages,
+    AnyPages,
 
     /// Allocation requests of Type AllocateMaxAddress allocate any available
     /// range of pages whose uppermost address is less than or equal to
     /// the address pointed to by Memory on input.
-    AllocateMaxAddress,
+    MaxAddress,
 
     /// Allocation requests of Type AllocateAddress allocate pages at the
     /// address pointed to by Memory on input.
-    AllocateAddress,
+    Address,
 }
 
 /// Types of memory regions we can for example allocate from
@@ -775,7 +777,7 @@ pub fn allocate_pages(num_pages: usize) -> Result<usize> {
 
     // We use 'AllocateAnyPages' because we don't care where the pages
     // are located
-    let typ = EfiAllocateType::AllocateAnyPages;
+    let typ = EfiAllocateType::AnyPages;
 
     // We allocate from the LoaderData because the UEFI spec
     // recommends to use that when we are executing as
@@ -959,13 +961,13 @@ pub fn find_acpi_table() -> Result<usize> {
         }
 
         // Check if we found the ACPI RSDP
-        return if let Some(rsdp) = rsdp {
+        if let Some(rsdp) = rsdp {
             // Return the address
             Ok(rsdp as usize)
         } else {
             // Return a error if we did not find the RSDP
             Err(Error::UnableToFindACPITable)
-        };
+        }
     }
 }
 
