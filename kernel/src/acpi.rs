@@ -17,6 +17,17 @@ struct Rsdp {
     rsdt_addr: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct Rsdp20 {
+    rsdp: Rsdp,
+
+    length: u32,
+    xsdt_addr: u64,
+    extended_checksum: u8,
+    reserved: [u8; 3],
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
 pub struct SDTHeader {
@@ -88,9 +99,15 @@ pub fn initialize<P>(physical_memory: &P, boot_info: &BootInfo)
         // TODO(patrik): Remove unwrap
         let rsdp_addr = boot_info.acpi_table().raw().try_into().unwrap();
         let rsdp_addr = PhysicalAddress(rsdp_addr);
-        let rsdp = unsafe { physical_memory.read::<Rsdp>(rsdp_addr) };
+        let rsdp = unsafe { physical_memory.read_unaligned::<Rsdp>(rsdp_addr) };
 
-        acpi_addr = Some(PhysicalAddress(rsdp.rsdt_addr as usize));
+        if rsdp.revision >= 2 {
+            println!("Warning: ACPI Revision 2 Not supported TODO");
+        }
+
+        let sdt_addr = rsdp.rsdt_addr as usize;
+
+        acpi_addr = Some(PhysicalAddress(sdt_addr));
     }
 
     unsafe {

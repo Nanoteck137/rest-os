@@ -88,7 +88,7 @@ fn compile_asm<P: AsRef<Path>>(source: P) {
     if !output.status.success() {
         let error_message = std::str::from_utf8(&output.stderr)
             .expect("Failed to convert stderr to str");
-        eprintln!("Error Message:\n{}", error_message);
+        eprintln!("NASM Error Message:\n{}", error_message);
 
         std::process::exit(-1);
     }

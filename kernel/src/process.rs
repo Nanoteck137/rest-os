@@ -150,8 +150,9 @@ impl Process {
                 let source = data.as_ptr();
                 let dest = vaddr.0 as *mut u8;
                 let count = size;
+                // TODO(patrik): How do we copy over the data
                 unsafe {
-                    core::ptr::copy_nonoverlapping(source, dest, count);
+                    // core::ptr::copy_nonoverlapping(source, dest, count);
                 }
             }
         }

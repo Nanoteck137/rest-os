@@ -27,7 +27,7 @@ fn run_docker_package() {
 
     if !output.status.success() {
         let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
-        eprintln!("Error Message:\n{}", error_message);
+        eprintln!("Docker Error Message:\n{}", error_message);
     }
 }
 

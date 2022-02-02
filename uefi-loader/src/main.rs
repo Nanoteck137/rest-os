@@ -26,6 +26,11 @@ use boot::BootMemoryMapType;
 
 mod efi;
 
+const STACK_SIZE: usize = 2 * 1024 * 1024;
+const STACK_PAGE_COUNT: usize = STACK_SIZE / 4096;
+
+const TRAMPOLINE_CODE: [u8; 5] = [0x0F, 0x22, 0xDB, 0xFF, 0xD0];
+
 /// ConsoleWriter is responsible to print strings to the EFI Stdout
 struct ConsoleWriter {}
 
@@ -246,91 +251,46 @@ unsafe fn map_page_4k(frame_alloc: &mut FrameAlloc,
     Some(())
 }
 
-/// The main entry point for a EFI application
-///
-/// # Arguments
-///
-/// * `image_handle` - The firmware allocated handle for the UEFI image
-/// * `table` - A pointer to the EFI System Table
-#[no_mangle]
-fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
-    unsafe {
-        table.register();
-    }
+fn get_page_count(elf: &Elf) -> usize {
+    let mut total = 0;
 
-    // TODO(patrik): Load the initrd
-    // TODO(patrik): Code cleanup
-    // TODO(patrik): Create some kind of structure to pass in to the kernel
-    //   - Starting Heap
-    //     - Just find a region of 'ConventionalMemory' to use for the heap
-    //   - Memory map
-    //   - ACPI Tables
-    //   - Initrd
-    //
-    //   - Kernel command line, Where from to retrive the command line?
-    //     - Read from a file?
-    //     - Embed inside the bootloader or kernel executable?
-    //   - Early identity map of physical memory
-    //     - We know that all of physical memory should be mapped when UEFI
-    //       boots, so the kernel could use that temporary mapping before the
-    //       kernel creates it's own page table
-    //   - Framebuffer
+    // Add all the program headers
+    for program_header in elf.program_headers() {
+        // If the program header is not the type of `ProgramHeaderType::Load`
+        // then just continue to the next one
+        if program_header.typ() != ProgramHeaderType::Load {
+            continue;
+        }
 
-    // Clear the screen
-    efi::clear_screen()
-        .expect("Failed to clear the screen");
+        // Get the size in memory this program header takes up
+        let memory_size = program_header.memory_size();
+        // Get the alignment
+        let alignment = program_header.alignment();
+        // NOTE(patrik): We only support a alignment of 0x1000 or 4096 because
+        // it's easier to map the pages inside the page table. but in the
+        // future we could supoprt other alignment but for now we know the
+        // alignment is always gonna be 4096 for this kernel
+        assert!(alignment == 0x1000, "We only support an alignment of 4096");
 
-    // Get the cr3
-    let cr3 = unsafe { read_cr3() };
-    // Mask of the bottom 12-bits
-    let page_table = cr3 & !0xfff;
-    println!("Current page table address: {:#x}", page_table);
+        // Calculate the number of pages
+        let page_count = (memory_size + (alignment - 1)) / alignment;
+        let page_count = page_count as usize;
 
-    // Create the frame allocator with a size of 512 frames
-    let mut frame_alloc = FrameAlloc::new(512);
-
-    // Parse the kernel executable
-    let elf = Elf::parse(&KERNEL_EXECUTABLE)
-        .expect("Failed to parse kernel executable");
-
-    let total_page_count = {
-        let mut total = 0;
-        for program_header in elf.program_headers() {
-            // If the program header is not the type of `ProgramHeaderType::Load`
-            // then just continue to the next one
-            if program_header.typ() != ProgramHeaderType::Load {
-                continue;
-            }
-
-            // Get the size in memory this program header takes up
-            let memory_size = program_header.memory_size();
-            // Get the alignment
-            let alignment = program_header.alignment();
-            // NOTE(patrik): We only support a alignment of 0x1000 or 4096 because
-            // it's easier to map the pages inside the page table. but in the
-            // future we could supoprt other alignment but for now we know the
-            // alignment is always gonna be 4096 for this kernel
-            assert!(alignment == 0x1000, "We only support an alignment of 4096");
-
-            // Calculate the number of pages
-            let page_count = (memory_size + (alignment - 1)) / alignment;
-            let page_count = page_count as usize;
-
-            total += page_count;
-        };
-
-        total
+        total += page_count;
     };
 
-    let stack_size = (1 * 1024 * 1024) / 4096;
-    let total_page_count = total_page_count + stack_size;
+    // Add the stack
+    total += STACK_PAGE_COUNT;
 
-    // Allocate all the pages the kernel executable need
-    let kernel_start = efi::allocate_pages(total_page_count)
-        .expect("Failed to allocate pages for kernel executable");
+    total
+}
 
-    let kernel_end = kernel_start + total_page_count * 4096;
-
+fn map_in_kernel(elf: &Elf,
+                 start: u64,
+                 frame_alloc: &mut FrameAlloc,
+                 kernel_page_table: u64)
+    -> (u64, u64)
+{
     let mut current_offset = 0;
     let mut end_addr = 0;
 
@@ -357,8 +317,8 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         let page_count = page_count as usize;
 
         // Allocate the necessary pages for the program header
-        let addr = kernel_start + current_offset;
-        current_offset += page_count * 4096;
+        let addr = start + current_offset;
+        current_offset += page_count as u64 * 4096;
 
         let end = program_header.vaddr() as usize + page_count * 4096;
         end_addr = core::cmp::max(end, end_addr);
@@ -395,24 +355,128 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
 
             unsafe {
                 // Map in the page
-                map_page_4k(&mut frame_alloc, cr3, vaddr, paddr);
+                map_page_4k(frame_alloc, kernel_page_table, vaddr, paddr);
             }
         }
     }
 
-    let stack_start = kernel_start + current_offset;
-    let stack_end = stack_start + (stack_size * 4096);
+    (start + current_offset, end_addr.try_into().unwrap())
+}
 
-    let kernel_stack_end = end_addr + stack_size * 4096;
+fn map_in_stack(start_paddr: u64,
+                start_vaddr: u64,
+                frame_alloc: &mut FrameAlloc,
+                kernel_page_table: u64)
+    -> u64
+{
+    // let stack_start = start_addr;
+    // let stack_end = stack_start + STACK_SIZE.try_into().unwrap();
 
-    for index in (0..(stack_size * 4096)).step_by(4096) {
-        let vaddr = end_addr + index;
-        let paddr = stack_start + index;
+    for off in (0..STACK_SIZE).step_by(4096) {
+        let vaddr: u64 = start_vaddr + off as u64;
+        let paddr: u64 = start_paddr + off as u64;
 
         unsafe {
-            map_page_4k(&mut frame_alloc, cr3, vaddr as u64, paddr as u64);
+            map_page_4k(frame_alloc, kernel_page_table,
+                        vaddr as u64, paddr as u64);
         }
     }
+
+    start_vaddr + STACK_SIZE as u64
+}
+
+fn identity_map(frame_alloc: &mut FrameAlloc, kernel_page_table: u64) {
+    for off in (0..(16 * 1024 * 1024)).step_by(4096) {
+        let vaddr = off;
+        let paddr = off;
+        unsafe {
+            map_page_4k(frame_alloc, kernel_page_table, vaddr, paddr);
+        }
+    }
+}
+
+fn prepare_trampoline(frame_alloc: &mut FrameAlloc, kernel_page_table: u64)
+    -> u64
+{
+    // Allocate all the pages the kernel executable need
+    let trampoline_addr = efi::allocate_pages(1)
+        .expect("Failed to allocate page for trampoline code");
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(TRAMPOLINE_CODE.as_ptr(),
+                                       trampoline_addr as *mut u8,
+                                       TRAMPOLINE_CODE.len());
+
+        map_page_4k(frame_alloc, kernel_page_table,
+                    trampoline_addr as u64, trampoline_addr as u64);
+    }
+
+    trampoline_addr as u64
+}
+
+/// The main entry point for a EFI application
+///
+/// # Arguments
+///
+/// * `image_handle` - The firmware allocated handle for the UEFI image
+/// * `table` - A pointer to the EFI System Table
+#[no_mangle]
+fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
+    unsafe {
+        table.register();
+    }
+
+    // TODO(patrik):
+    //   - Setup a custom page table
+    //   - We need to map in the boot info structure too
+    //   - Use a trampoline to call into the kernel
+    //     - Use the same address for the
+
+    // TODO(patrik): Code cleanup
+    // TODO(patrik):
+    //   - Kernel command line, Where from to retrive the command line?
+    //     - Read from a file?
+    //     - Embed inside the bootloader or kernel executable?
+    //   - Early identity map of physical memory
+    //     - We know that all of physical memory should be mapped when UEFI
+    //       boots, so the kernel could use that temporary mapping before the
+    //       kernel creates it's own page table
+    //   - Framebuffer
+
+    // Clear the screen
+    efi::clear_screen()
+        .expect("Failed to clear the screen");
+
+    // Create the frame allocator with a size of 512 frames
+    let mut frame_alloc = FrameAlloc::new(512);
+
+    // Create the kernel page table
+    let kernel_page_table = frame_alloc.alloc_zeroed();
+    let kernel_page_table = kernel_page_table as u64;
+
+    // Parse the kernel executable
+    let elf = Elf::parse(&KERNEL_EXECUTABLE)
+        .expect("Failed to parse kernel executable");
+
+    let total_page_count = get_page_count(&elf);
+
+    // Allocate all the pages the kernel executable need
+    let kernel_start = efi::allocate_pages(total_page_count)
+        .expect("Failed to allocate pages for kernel executable");
+
+    let kernel_end = kernel_start + total_page_count * 4096;
+
+    let (end_paddr, end_vaddr) = map_in_kernel(&elf, kernel_start.try_into().unwrap(),
+                                 &mut frame_alloc, kernel_page_table);
+    let kernel_stack_end = map_in_stack(end_paddr, end_vaddr,
+                                        &mut frame_alloc, kernel_page_table);
+
+    println!("Kernel Stack: {:#x?}", kernel_stack_end);
+
+    identity_map(&mut frame_alloc, kernel_page_table);
+
+    let trampoline_entry = prepare_trampoline(&mut frame_alloc,
+                                              kernel_page_table);
 
     // Create a buffer for the efi memory map
     let mut buffer = [0; 2 * 4096];
@@ -422,9 +486,11 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         efi::memory_map(&mut buffer)
             .expect("Failed to retrive the memory map");
 
+
     // Get the ACPI RSDP
     let acpi_table = efi::find_acpi_table()
         .expect("Failed to find the ACPI table");
+
     let acpi_table = BootPhysicalAddress::new(acpi_table as u64);
 
     let kernel_start = BootPhysicalAddress::new(kernel_start as u64);
@@ -486,6 +552,28 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         boot_info.add_memory_map_entry(entry);
     }
 
+    for entry in boot_info.memory_map() {
+        let start = entry.addr().raw();
+        let length = entry.length();
+        let end = start + length - 1;
+
+        print!("[0x{:016x}-0x{:016x}] ", start, end);
+
+        if length >= 1 * 1024 * 1024 * 1024 {
+            print!("{:>4} GiB ", length / 1024 / 1024 / 1024);
+        } else if length >= 1 * 1024 * 1024 {
+            print!("{:>4} MiB ", length / 1024 / 1024);
+        } else if length >= 1 * 1024 {
+            print!("{:>4} KiB ", length / 1024);
+        } else {
+            print!("{:>4} B   ", length);
+        }
+
+        print!("{:?}", entry.typ());
+
+        println!();
+    }
+
     // TODO(patirk): Static assert
     assert!(core::mem::size_of::<BootInfo>() <= 4096,
             "The BootInfo structure needs to fit inside a page (4096)");
@@ -494,9 +582,12 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
     let boot_info_ptr = boot_info_addr as *mut BootInfo;
     unsafe {
         core::ptr::write(boot_info_ptr, boot_info);
+
+        map_page_4k(&mut frame_alloc, kernel_page_table,
+                    boot_info_addr as u64, boot_info_addr as u64);
     }
 
-    let (memory_map_size, descriptor_size)  = loop {
+    let (memory_map_size, descriptor_size) = loop {
         let (memory_map_size, map_key, descriptor_size) =
             efi::memory_map(&mut buffer)
                 .expect("Failed to retrive the memory map");
@@ -507,29 +598,24 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         }
     };
 
-    // Create a type for the kernel entry point
-    type KernelEntry =
-        unsafe extern "sysv64" fn(boot_info_addr: u64) -> !;
-
     // Get the address for the entry point inside the kernel executable
     let entry_point = elf.entry();
-    // Transmute the entry point to a `KernelEntry` so that we can call into
-    // the kernel
-    let entry: KernelEntry = unsafe { core::mem::transmute(entry_point) };
-
-    // Call into the kernel
-    unsafe {
-        // (entry)(boot_info_addr as u64);
-    }
 
     unsafe {
+        // rax - Kernel Entry
+        // rbx - Page Table
+        // rdi - Boot Info Structure
         asm!("
-             /* {1} */
-             mov rdi, {0}
-             mov rsp, {1}
-             jmp {2}", in(reg) boot_info_addr,
-                       in(reg) kernel_stack_end,
-                       in(reg) entry_point);
+             mov rax, {0}
+             mov rbx, {1}
+             mov rdi, {2}
+             mov rsp, {3}
+             jmp {4}",
+             in(reg) entry_point,
+             in(reg) kernel_page_table,
+             in(reg) boot_info_addr,
+             in(reg) kernel_stack_end,
+             in(reg) trampoline_entry);
     }
     loop {}
 }

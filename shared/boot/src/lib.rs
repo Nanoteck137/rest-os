@@ -3,9 +3,25 @@
 
 #![no_std]
 
-const MAX_MEMORY_MAP_ENTRIES: usize = 64;
+const MAX_MEMORY_MAP_ENTRIES: usize = 128;
 
 pub type BootSize = u64;
+
+fn overlaps(mut x1: u64, mut x2: u64, mut y1: u64, mut y2: u64) -> bool {
+    if x1 > x2 {
+        core::mem::swap(&mut x1, &mut x2);
+    }
+
+    if y1 > y2 {
+        core::mem::swap(&mut y1, &mut y2);
+    }
+
+    if x1 <= y2 && y1 <= x2 {
+        return true;
+    }
+
+    false
+}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(transparent)]
@@ -78,6 +94,11 @@ impl BootMemoryMapEntry {
     pub fn typ(&self) -> BootMemoryMapType {
         self.typ
     }
+
+    pub fn overlaps(&self, other: Self) -> bool {
+        return overlaps(self.addr.raw(), self.addr.raw() + self.length,
+                        other.addr.raw(), other.addr.raw() + other.length);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -99,7 +120,7 @@ pub struct BootInfo {
     memory_map: [BootMemoryMapEntry; MAX_MEMORY_MAP_ENTRIES],
 
     /// Number of entries used inside the `memory_map`
-    num_memory_map_entries: usize,
+    pub num_memory_map_entries: usize,
 
     /// The address of the ACPI RSDP
     acpi_table: BootPhysicalAddress,
@@ -143,11 +164,43 @@ impl BootInfo {
         self.initrd_length
     }
 
-    pub fn add_memory_map_entry(&mut self, entry: BootMemoryMapEntry)
+    pub fn memory_map(&self) -> &[BootMemoryMapEntry] {
+        &self.memory_map[..self.num_memory_map_entries]
+    }
+
+    pub fn acpi_table(&self) -> BootPhysicalAddress {
+        self.acpi_table
+    }
+
+    pub fn add_memory_map_entry(&mut self, mut entry: BootMemoryMapEntry)
         -> Option<()>
     {
         if self.num_memory_map_entries >= self.memory_map.len() {
             return None;
+        }
+
+        'merge: loop {
+            for index in 0..self.num_memory_map_entries {
+                let ent = self.memory_map[index];
+
+                if entry.typ() != ent.typ() {
+                    continue;
+                }
+
+                if !ent.overlaps(entry) {
+                    continue;
+                }
+
+                let addr = core::cmp::min(entry.addr.raw(), ent.addr.raw());
+                entry.addr = BootPhysicalAddress(addr);
+                entry.length += ent.length;
+
+                self.delete_memory_map_entry(index);
+
+                continue 'merge;
+            }
+
+            break;
         }
 
         self.memory_map[self.num_memory_map_entries] = entry;
@@ -156,11 +209,11 @@ impl BootInfo {
         Some(())
     }
 
-    pub fn memory_map(&self) -> &[BootMemoryMapEntry] {
-        &self.memory_map[..self.num_memory_map_entries]
-    }
+    fn delete_memory_map_entry(&mut self, idx: usize) {
+        for index in idx..self.num_memory_map_entries - 1 {
+            self.memory_map.swap(index, index + 1);
+        }
 
-    pub fn acpi_table(&self) -> BootPhysicalAddress {
-        self.acpi_table
+        self.num_memory_map_entries -= 1;
     }
 }

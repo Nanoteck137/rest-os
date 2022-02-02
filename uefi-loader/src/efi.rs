@@ -780,7 +780,7 @@ pub fn allocate_pages(num_pages: usize) -> Result<usize> {
     // We allocate from the LoaderData because the UEFI spec
     // recommends to use that when we are executing as
     // UEFI application/loader
-    let memory_type = EfiMemoryType::LoaderData;
+    let memory_type = EfiMemoryType::LoaderCode;
 
     // The address we got from `allocate_pages`
     let mut addr = 0usize;

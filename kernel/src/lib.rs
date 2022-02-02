@@ -334,7 +334,8 @@ pub extern fn kernel_init(boot_info_addr: u64) -> ! {
         let initrd_len: usize = boot_info.initrd_length().try_into().unwrap();
 
         let initrd_paddr = PhysicalAddress(initrd_addr.try_into().unwrap());
-        let data = unsafe { KERNEL_PHYSICAL_MEMORY.slice(initrd_paddr, initrd_len) };
+        let data =
+            unsafe { KERNEL_PHYSICAL_MEMORY.slice(initrd_paddr, initrd_len) };
         let initrd_vaddr = KERNEL_PHYSICAL_MEMORY.translate(initrd_paddr)
             .expect("Failed to translate initrd address");
 
