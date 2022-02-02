@@ -26,9 +26,19 @@ use boot::BootMemoryMapType;
 
 mod efi;
 
+/// The kernel stack size in bytes
 const STACK_SIZE: usize = 2 * 1024 * 1024;
+/// The number of pages required for the stack
 const STACK_PAGE_COUNT: usize = STACK_SIZE / 4096;
 
+// Assembly code used:
+// rax - Kernel Entry Point
+// rbx - Page Table
+// rdi - Boot Info Addr
+//
+// mov cr3, rbx
+// call rax
+/// The trampoline code used to give control over to the kernel
 const TRAMPOLINE_CODE: [u8; 5] = [0x0F, 0x22, 0xDB, 0xFF, 0xD0];
 
 /// ConsoleWriter is responsible to print strings to the EFI Stdout
@@ -251,6 +261,15 @@ unsafe fn map_page_4k(frame_alloc: &mut FrameAlloc,
     Some(())
 }
 
+/// Calculate the total number of pages for the kernel
+///
+/// # Arguments
+///
+/// * `elf` - The kernel elf executable
+///
+/// # Returns
+///
+/// * Returns the number of pages we need for the kernel
 fn get_page_count(elf: &Elf) -> usize {
     let mut total = 0;
 
@@ -285,6 +304,20 @@ fn get_page_count(elf: &Elf) -> usize {
     total
 }
 
+/// Map in the kernel executable
+///
+/// # Arguments
+///
+/// * `elf` - The kernel elf executable
+/// * `start` - The start address of the kernel inside physical memory where
+///             we are gonna copy and map the kernel executable
+/// * `frame_alloc` - The frame allocator the mapping code uses
+/// * `kernel_page_table` - The address of the kernel page table
+///
+/// # Returns
+///
+/// * `0` - The end of the kernel in physical memory
+/// * `1` - The end of the kernel in virtual memory
 fn map_in_kernel(elf: &Elf,
                  start: u64,
                  frame_alloc: &mut FrameAlloc,
@@ -363,6 +396,18 @@ fn map_in_kernel(elf: &Elf,
     (start + current_offset, end_addr.try_into().unwrap())
 }
 
+/// Map in early kernel stack
+///
+/// # Arguments
+///
+/// * `start_paddr` - The start address of the stack inside physical memory
+/// * `start_vaddr` - The start address of the stack inside virtual memory
+/// * `frame_alloc` - The frame allocator the mapping code uses
+/// * `kernel_page_table` - The address of the kernel page table
+///
+/// # Returns
+///
+/// * Returns the top of the stack
 fn map_in_stack(start_paddr: u64,
                 start_vaddr: u64,
                 frame_alloc: &mut FrameAlloc,
@@ -385,6 +430,12 @@ fn map_in_stack(start_paddr: u64,
     start_vaddr + STACK_SIZE as u64
 }
 
+/// Create a identity map for the kernel page table
+///
+/// # Arguments
+///
+/// * `frame_alloc` - The frame allocator the mapping code uses
+/// * `kernel_page_table` - The address of the kernel page table
 fn identity_map(frame_alloc: &mut FrameAlloc, kernel_page_table: u64) {
     for off in (0..(16 * 1024 * 1024)).step_by(4096) {
         let vaddr = off;
@@ -395,6 +446,16 @@ fn identity_map(frame_alloc: &mut FrameAlloc, kernel_page_table: u64) {
     }
 }
 
+/// Prepares the trampoline code and maps it inside the new kernel page table
+///
+/// # Arguments
+///
+/// * `frame_alloc` - The frame allocator the mapping code uses
+/// * `kernel_page_table` - The address of the kernel page table
+///
+/// # Returns
+///
+/// * Returns the entry point for the trampoline
 fn prepare_trampoline(frame_alloc: &mut FrameAlloc, kernel_page_table: u64)
     -> u64
 {
@@ -426,21 +487,11 @@ fn efi_main(image_handle: EfiHandle, table: EfiSystemTablePtr) -> ! {
         table.register();
     }
 
-    // TODO(patrik):
-    //   - Setup a custom page table
-    //   - We need to map in the boot info structure too
-    //   - Use a trampoline to call into the kernel
-    //     - Use the same address for the
-
     // TODO(patrik): Code cleanup
     // TODO(patrik):
     //   - Kernel command line, Where from to retrive the command line?
     //     - Read from a file?
     //     - Embed inside the bootloader or kernel executable?
-    //   - Early identity map of physical memory
-    //     - We know that all of physical memory should be mapped when UEFI
-    //       boots, so the kernel could use that temporary mapping before the
-    //       kernel creates it's own page table
     //   - Framebuffer
 
     // Clear the screen

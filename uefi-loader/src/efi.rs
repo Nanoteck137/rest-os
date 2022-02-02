@@ -54,7 +54,7 @@ pub enum Error {
     UnableToFindACPITable,
 }
 
-/// Efi GUID 128-bit ID
+/// EFI GUID 128-bit ID
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 struct EfiGuid {
