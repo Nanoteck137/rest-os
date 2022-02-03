@@ -47,7 +47,7 @@ fn linker_script_path() -> PathBuf {
     let mut path = kernel_source(&[]);
     path.push("arch");
     path.push("x86_64");
-    path.push("linker.ld");
+    path.push("grub-linker.ld");
 
     path
 }
@@ -147,7 +147,7 @@ pub fn build(release_mode: bool) {
     compile_asm(boot_asm_path);
 
     // Build the kernel rust project
-    build_rust_project("kernel", "target", release_mode);
+    build_rust_project("kernel", "target", release_mode, true);
 
     // Link the kernel executable
     let kernel_archive = kernel_archive(release_mode);

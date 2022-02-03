@@ -7,6 +7,8 @@ use crate::util::align_down;
 use core::convert::TryFrom;
 use alloc::vec::Vec;
 
+use boot::{ BootMemoryMapType, BootMemoryMapEntry };
+
 pub trait FrameAllocator {
     fn alloc_frame(&mut self) -> Option<Frame>;
     fn free_frame(&mut self, frame: Frame);
@@ -142,10 +144,12 @@ impl BitmapFrameAllocator {
         }
     }
 
-    pub unsafe fn init(&mut self, memory_map: MemoryMap) -> Option<()> {
-        for mmap_entry in memory_map.iter() {
-            if mmap_entry.typ() == MemoryMapEntryType::Available {
-                let addr = mmap_entry.addr() as usize;
+    pub unsafe fn init(&mut self, memory_map: &[BootMemoryMapEntry])
+        -> Option<()>
+    {
+        for mmap_entry in memory_map {
+            if mmap_entry.typ() == BootMemoryMapType::Available {
+                let addr = mmap_entry.addr().raw() as usize;
                 let length = mmap_entry.length() as usize;
                 let new_length = align_down(length, 4096);
 

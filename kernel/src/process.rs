@@ -140,18 +140,19 @@ impl Process {
                 }
 
                 let size = program_header.memory_size() as usize;
+                let vaddr = VirtualAddress(program_header.vaddr() as usize);
                 mm::map_in_userspace(&mut memory_space,
-                                     program_header.vaddr(),
-                                     size, flags)
+                                     vaddr, size, flags)
                     .expect("Failed to map in userspace");
 
                 let data = elf.program_data(&program_header);
 
                 let source = data.as_ptr();
-                let dest = program_header.vaddr().0 as *mut u8;
+                let dest = vaddr.0 as *mut u8;
                 let count = size;
+                // TODO(patrik): How do we copy over the data
                 unsafe {
-                    core::ptr::copy_nonoverlapping(source, dest, count);
+                    // core::ptr::copy_nonoverlapping(source, dest, count);
                 }
             }
         }

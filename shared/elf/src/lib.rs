@@ -1,6 +1,10 @@
 //! Module to parse and retrive infomation from a Elf file
 
-use crate::mm::{ VirtualAddress, PhysicalAddress };
+#![no_std]
+#![allow(dead_code)]
+
+#[macro_use]
+extern crate bitflags;
 
 use core::convert::TryInto;
 use core::convert::TryFrom;
@@ -397,6 +401,7 @@ pub struct ProgramHeader {
 
 impl ProgramHeader {
     fn parse(bytes: &[u8]) -> Option<Self> {
+        // TODO(patrik): Check bytes for correct length
 
         let typ = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
         let typ = ProgramHeaderType::try_from(typ).ok()?;
@@ -441,12 +446,12 @@ impl ProgramHeader {
         self.offset
     }
 
-    pub fn vaddr(&self) -> VirtualAddress {
-        VirtualAddress(self.vaddr as usize)
+    pub fn vaddr(&self) -> u64 {
+        self.vaddr
     }
 
-    pub fn paddr(&self) -> PhysicalAddress {
-        PhysicalAddress(self.paddr as usize)
+    pub fn paddr(&self) -> u64 {
+        self.paddr
     }
 
     pub fn file_size(&self) -> u64 {

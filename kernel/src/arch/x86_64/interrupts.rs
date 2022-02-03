@@ -206,7 +206,6 @@ unsafe extern fn interrupt_handler(number: u8,
 
             // super::out8(0x64, 0xff);
 
-            super::apic::eoi(222);
             core!().arch().apic().eoi();
         } else {
             println!("CPU Interrupts: {}", number);

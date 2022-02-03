@@ -55,11 +55,14 @@ fn kernel_source(components: &[&str]) -> PathBuf {
     result
 }
 
-fn compile_asm<P: AsRef<Path>>(source: P) -> Option<()> {
+fn compile_asm<P: AsRef<Path>>(source: P) {
     let source = source.as_ref();
 
     // Get the filename without the extention
-    let file_name = source.file_stem()?.to_str()?;
+    let file_name = source.file_stem()
+        .expect("Failed to retrive the file stem");
+    let file_name = file_name.to_str()
+        .expect("Failed to convert the file stem to str");
     // Create an string so we can append an extention
     let mut file_name = String::from(file_name);
     // Append an ".o" extention to the target filename
@@ -83,50 +86,46 @@ fn compile_asm<P: AsRef<Path>>(source: P) -> Option<()> {
             .expect("Unknown error when running 'nasm' (is nasm installed?)");
 
     if !output.status.success() {
-        let error_message = std::str::from_utf8(&output.stderr).ok()?;
-        eprintln!("Error Message:\n{}", error_message);
-        return None;
-    }
+        let error_message = std::str::from_utf8(&output.stderr)
+            .expect("Failed to convert stderr to str");
+        eprintln!("NASM Error Message:\n{}", error_message);
 
-    Some(())
+        std::process::exit(-1);
+    }
 }
 
 fn build_rust_project<P: AsRef<Path>>(project_path: P, target_path: P,
-                                      release_mode: bool)
-    -> Option<()>
+                                      release_mode: bool,
+                                      need_linker: bool)
 {
     let project_path = project_path.as_ref();
-    let target_path = target_path.as_ref().canonicalize().ok()?;
+    let target_path = target_path.as_ref().canonicalize()
+        .expect("Failed to cononicalize the target path");
     println!("Building rust: {:?} -> {:?}", project_path, target_path);
 
     let linker = linker();
 
-    let status =  if release_mode {
-        Command::new("cargo")
-            .current_dir(project_path)
-            .env("RUSTFLAGS", format!("-C linker={}", linker))
-            .arg("build")
-            .arg("--release")
-            .arg("--target-dir")
-            .arg(target_path)
-            .status()
-                .expect("Unknown error when running 'cargo'")
-    } else {
-        Command::new("cargo")
-            .current_dir(project_path)
-            .env("RUSTFLAGS", format!("-C linker={}", linker))
-            .arg("build")
-            .arg("--target-dir")
-            .arg(target_path)
-            .status()
-                .expect("Unknown error when running 'cargo'")
-    };
-
-    if !status.success() {
-        return None;
+    let mut command = Command::new("cargo");
+    command.current_dir(project_path);
+    if need_linker {
+        command.env("RUSTFLAGS", format!("-C linker={}", linker));
     }
 
-    Some(())
+    command.arg("build");
+
+    if release_mode {
+        command.arg("--release");
+    }
+
+    command.arg("--target-dir");
+    command.arg(target_path);
+
+    let status = command.status()
+        .expect("Unknown error when running 'cargo'");
+
+    if !status.success() {
+        std::process::exit(-1);
+    }
 }
 
 fn link_executable<P>(obj_file: P, target: P, linker_script: P)
@@ -153,10 +152,12 @@ fn link_executable<P>(obj_file: P, target: P, linker_script: P)
     if !output.status.success() {
         let error_message = std::str::from_utf8(&output.stderr).ok().unwrap();
         eprintln!("Linking Error Message:\n{}", error_message);
+
+        std::process::exit(-1);
     }
 }
 
-fn build_userland_bin(name: &str) -> Option<()> {
+fn build_userland_bin(name: &str) {
     let mut project_path = PathBuf::new();
     project_path.push("userland");
     project_path.push(name);
@@ -170,9 +171,7 @@ fn build_userland_bin(name: &str) -> Option<()> {
     println!("Target Path: {:?}", target_path);
 
     let _ = std::fs::create_dir(&target_path);
-    build_rust_project(project_path, target_path, false)?;
-
-    Some(())
+    build_rust_project(project_path, target_path, false, true);
 }
 
 fn copy_userland_bin_to_initrd(name: &str) {
@@ -193,17 +192,17 @@ fn copy_userland_bin_to_initrd(name: &str) {
     let _ = std::fs::copy(source, dest);
 }
 
-fn build_initrd() -> Option<()> {
+fn build_initrd() {
     let status = Command::new("./build_initrd.sh")
         .current_dir("misc")
         .status()
             .expect("Failed to run 'build_initrd.sh'");
 
     if !status.success() {
-        return None;
-    }
+        eprintln!("Failed to run './build_initrd.sh'");
 
-    Some(())
+        std::process::exit(-1);
+    }
 }
 
 fn prepare_initrd() {

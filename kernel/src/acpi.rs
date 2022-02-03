@@ -1,6 +1,9 @@
-use crate::multiboot::{ Multiboot, Tag };
 use crate::mm::{ PhysicalAddress, PhysicalMemory, KERNEL_PHYSICAL_MEMORY };
 use crate::util;
+
+use boot::BootInfo;
+
+use core::convert::TryInto;
 
 static mut ACPI_TABLE: Option<PhysicalAddress> = None;
 
@@ -12,6 +15,17 @@ struct Rsdp {
     oem_id: [u8; 6],
     revision: u8,
     rsdt_addr: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct Rsdp20 {
+    rsdp: Rsdp,
+
+    length: u32,
+    xsdt_addr: u64,
+    extended_checksum: u8,
+    reserved: [u8; 3],
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -29,6 +43,8 @@ pub struct SDTHeader {
 }
 
 // Reference: https://github.com/gamozolabs/chocolate_milk/blob/master/kernel/src/acpi.rs
+// TODO(patrik): This code should be part of the bootloader not the kernel
+/*
 unsafe fn search_acpi<P>(physical_memory: &P)
     -> Option<PhysicalAddress>
     where P: PhysicalMemory
@@ -72,27 +88,26 @@ unsafe fn search_acpi<P>(physical_memory: &P)
 
     None
 }
+*/
 
-pub fn initialize<P>(physical_memory: &P, multiboot: &Multiboot)
+pub fn initialize<P>(physical_memory: &P, boot_info: &BootInfo)
     where P: PhysicalMemory
 {
     let mut acpi_addr = None;
 
-    // Search for the RSDT inside the Multiboot structure
-    for tag in multiboot.tags() {
-        match tag {
-            Tag::Acpi1(addr) => acpi_addr = Some(addr),
-            Tag::Acpi2(addr, _) => acpi_addr = Some(addr),
+    if !boot_info.acpi_table().is_null() {
+        // TODO(patrik): Remove unwrap
+        let rsdp_addr = boot_info.acpi_table().raw().try_into().unwrap();
+        let rsdp_addr = PhysicalAddress(rsdp_addr);
+        let rsdp = unsafe { physical_memory.read_unaligned::<Rsdp>(rsdp_addr) };
 
-            _ => {},
+        if rsdp.revision >= 2 {
+            println!("Warning: ACPI Revision 2 Not supported TODO");
         }
-    }
 
-    if acpi_addr.is_none() {
-        // NOTE(patrik): The bootloader didn't find the ACPI table so
-        // we do a search to find it insteed
+        let sdt_addr = rsdp.rsdt_addr as usize;
 
-        acpi_addr = unsafe { search_acpi(physical_memory) }
+        acpi_addr = Some(PhysicalAddress(sdt_addr));
     }
 
     unsafe {
